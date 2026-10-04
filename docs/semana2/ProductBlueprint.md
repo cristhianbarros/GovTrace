@@ -218,7 +218,7 @@ Calculamos el costo de un **piloto**: una veeduría y unos 200 reportes al mes. 
 
 ## 6. Backlog priorizado (Kanban)
 
-**Enlace al tablero (obligatorio):** _pendiente, pegar aquí el enlace del tablero de GitHub Projects._
+**Enlace al tablero (obligatorio):** [Tablero Kanban de GovTrace en GitHub Projects](https://github.com/users/cristhianbarros/projects/2/views/1?system_template=kanban)
 
 El tablero tiene cinco columnas: **Backlog**, **Por hacer**, **En progreso**, **En revisión** y **Hecho**. Cada tarjeta corresponde a una historia de la sección 1, en el mismo orden, y lleva sus criterios de aceptación:
 
@@ -228,15 +228,15 @@ El tablero tiene cinco columnas: **Backlog**, **Por hacer**, **En progreso**, **
 | 2 | Registrar la veeduría | El NIT se valida con el dígito de verificación de la DIAN y no se puede repetir.<br>Cada veeduría queda con su propio subdominio y sus propios datos.<br>Su administrador inicial recibe la invitación por correo. | Cristhian |
 | 3 | Contrato de sellado en Stellar | El contrato queda desplegado en testnet.<br>Una cuenta distinta de la selladora no puede escribir.<br>Un sello repetido se rechaza. | Cristhian |
 | 4 | Configurar la veeduría | El administrador activa su cuenta con la invitación.<br>Elige los municipios que vigila.<br>Invita a un veedor con su correo; la invitación vence a las 48 horas. | Meliza |
-| 5 | Cuenta del veedor | Con el enlace de la invitación, el veedor crea su contraseña y queda activo.<br>Inicia sesión en el sitio de su veeduría y llega a "Nuevo reporte".<br>Tras 5 intentos fallidos la cuenta se bloquea 15 minutos. | Brian |
+| 5 | Cuenta del veedor | Con el enlace de la invitación, el veedor crea su contraseña y queda activo.<br>Inicia sesión en el sitio de su veeduría y llega a "Nuevo reporte".<br>Tras 5 intentos fallidos la cuenta se bloquea 15 minutos. | Brayan |
 | 6 | Informe del ciudadano | Se envía desde la página de la obra, sin crear cuenta.<br>El ciudadano confirma su correo con un código de 6 dígitos que vence en 10 minutos.<br>Admite un texto de 20 a 2.000 caracteres y una foto opcional.<br>No se publica: llega a la bandeja de la veeduría. | Camilo |
 | 7 | Atender informes ciudadanos | El administrador ve los informes de sus obras, sin el correo de quien los envió.<br>Su respuesta le llega al ciudadano por correo. | Meliza |
-| 8 | Buscar la obra | Busca por nombre de la obra, contratista o número de proceso, desde 3 letras.<br>Solo muestra contratos de obra del territorio de la veeduría. | Brian |
-| 9 | Crear reporte con GPS | El reporte queda ligado a la obra y guarda la ubicación con 50 m de precisión o mejor.<br>Si el veedor está a más de 500 m de la obra, no se envía y se le explica por qué.<br>El veedor clasifica lo que vio: Avance, Retraso o Abandono. | Brian |
-| 10 | Adjuntar fotos | De 1 a 5 fotos o un PDF, de hasta 10 MB cada uno.<br>El celular calcula la huella SHA-256 de cada archivo y el servidor comprueba que coincida. | Brian |
+| 8 | Buscar la obra | Busca por nombre de la obra, contratista o número de proceso, desde 3 letras.<br>Solo muestra contratos de obra del territorio de la veeduría. | Brayan |
+| 9 | Crear reporte con GPS | El reporte queda ligado a la obra y guarda la ubicación con 50 m de precisión o mejor.<br>Si el veedor está a más de 500 m de la obra, no se envía y se le explica por qué.<br>El veedor clasifica lo que vio: Avance, Retraso o Abandono. | Brayan |
+| 10 | Adjuntar fotos | De 1 a 5 fotos o un PDF, de hasta 10 MB cada uno.<br>El celular calcula la huella SHA-256 de cada archivo y el servidor comprueba que coincida. | Brayan |
 | 11 | Sellar el reporte | La huella del reporte queda en el contrato de Soroban con su ledger y su hora.<br>La comisión la paga la cuenta patrocinadora (fee bump); el veedor no necesita XLM.<br>Si la red falla, el registro se reintenta solo. | Cristhian |
 | 12 | Revisar y publicar | Las evidencias nuevas no se ven en el sitio público.<br>El administrador las publica o las rechaza con un motivo.<br>Publicar no cambia el archivo ni su sello. | Meliza |
-| 13 | Mis reportes | El veedor ve solo sus reportes, con su estado: en revisión, publicado o rechazado.<br>Un reporte sellado muestra su transacción y el enlace a Stellar Expert. | Brian |
+| 13 | Mis reportes | El veedor ve solo sus reportes, con su estado: en revisión, publicado o rechazado.<br>Un reporte sellado muestra su transacción y el enlace a Stellar Expert. | Brayan |
 | 14 | Mapa y página de la obra | Cada obra aparece como un pin en el mapa.<br>Su página muestra entidad, contratista, valor, plazo y enlace al SECOP II.<br>Las evidencias publicadas aparecen por fecha, cada una con el enlace a su sello. | Camilo |
 | 15 | Validar un archivo | El archivo no sale del navegador; solo se calcula su huella.<br>Responde "Archivo Auténtico" con la fecha del sello, "Archivo Alterado o Falso" o "No encontrado". | Camilo |
 | 16 | Saldo y comisiones | El panel muestra el saldo en XLM de la cuenta patrocinadora, leído de la red.<br>Muestra lo pagado en comisiones por organización. | Cristhian |
