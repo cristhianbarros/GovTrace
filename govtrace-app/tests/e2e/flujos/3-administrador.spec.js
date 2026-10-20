@@ -1,0 +1,180 @@
+// It. 40a — el flujo del Administrador de Organización (docs/mapa-funcional.md,
+// sección 2), en la organización del fixture: dos evidencias esperan en su Bandeja.
+import { expect, test } from '@playwright/test';
+import { ORG, PEOPLE, WORKSITE, latestMailAbout, logIn, logOut } from './support.js';
+
+test.describe.configure({ mode: 'serial' });
+
+async function enter(page, screen) {
+    await logIn(page, ORG, PEOPLE.admin);
+    await page.waitForURL('**/admin/inbox');
+    if (screen) {
+        await page.goto(`${ORG}/admin/${screen}`);
+    }
+}
+
+test('Entra y llega a su Bandeja, con las evidencias por revisar', async ({ page }) => {
+    await enter(page);
+
+    await expect(page.getByRole('heading', { name: 'Bandeja de entrada', exact: true })).toBeVisible();
+    // Las dos del fixture por revisar. El reporte que el Super Administrador crea en nombre de la
+    // organización (V7, flujo 2) también llega si la red local ya lo selló: no se cuenta aquí.
+    await expect(page.locator('article').filter({ hasText: 'Enviada por Veedor E2E' }).getByRole('button', { name: 'Publicar' })).toHaveCount(2);
+});
+
+test('Filtra la Bandeja por clasificación y la deja como estaba (it. 52)', async ({ page }) => {
+    await enter(page);
+    const abandonment = page.locator('article').filter({ hasText: 'La obra quedó sin cerramiento ni vigilancia.' });
+    const progress = page.locator('article').filter({ hasText: 'Instalan las luminarias de la cancha.' });
+    await expect(abandonment).toHaveCount(1);
+    await expect(progress).toHaveCount(1);
+
+    await page.getByText('Filtrar', { exact: true }).click();
+    await page.getByLabel('Clasificación').selectOption('Abandono');
+    await expect(progress).toHaveCount(0);
+    await expect(abandonment).toHaveCount(1);
+
+    // Sin ninguna con esos filtros, lo dice; y "Quitar filtros" las trae todas.
+    await page.getByLabel('Clasificación').selectOption('Retraso');
+    await expect(page.getByText('Ninguna evidencia con esos filtros.')).toBeVisible();
+    await page.getByRole('button', { name: 'Quitar filtros' }).click();
+    await expect(abandonment).toHaveCount(1);
+    await expect(progress).toHaveCount(1);
+});
+
+test('Cada evidencia de la Bandeja dice de qué obra es y qué veedor la envió (V4)', async ({ page }) => {
+    await enter(page);
+    const card = page.locator('article').first();
+
+    await expect(card.locator('[data-test="worksite"]')).toHaveText(WORKSITE);
+    await expect(card).toContainText('Santa Marta');
+    await expect(card).toContainText('Enviada por Veedor E2E');
+});
+
+test('Cada evidencia de la Bandeja dice a qué distancia de la obra se tomó (it. 45f)', async ({ page }) => {
+    await enter(page);
+
+    await expect(page.locator('article').first()).toContainText(/Tomada a \d+ m de la obra\./);
+});
+
+test('Publica una evidencia: pasa al mapa', async ({ page }) => {
+    await enter(page);
+
+    await page.getByRole('button', { name: 'Publicar' }).first().click();
+
+    await expect(page.getByText('Evidencia publicada. Ya es visible en el mapa.')).toBeVisible();
+});
+
+test('Rechaza una evidencia con un motivo para el veedor', async ({ page }) => {
+    await enter(page);
+
+    await page.getByRole('button', { name: 'Rechazar' }).first().click();
+    await page.getByLabel('Motivo del rechazo (lo verá el veedor)').fill('No se ve el avance que describe.');
+    await page.getByRole('button', { name: 'Confirmar rechazo' }).click();
+
+    await expect(page.getByText('Evidencia rechazada. Su veedor verá el motivo.')).toBeVisible();
+});
+
+test('Arma su equipo: invita a un veedor, que queda pendiente', async ({ page }) => {
+    await enter(page, 'observers');
+
+    await page.getByLabel('Invitar un veedor de campo').fill('e2e.nuevo@correo.co');
+    await page.getByRole('button', { name: 'Enviar invitación' }).click();
+
+    await expect(page.getByText('Invitación enviada a e2e.nuevo@correo.co.', { exact: false })).toBeVisible();
+    await expect(page.getByText('Invitación pendiente')).toBeVisible();
+});
+
+test('V3: invita a otro Administrador a su organización, desde su propia pantalla (it. 43j, 54)', async ({ page }) => {
+    await enter(page, 'administrators');
+    // It. 54: los administradores ya no van en la pantalla de Veedores.
+    await expect(page.getByRole('heading', { name: 'Administradores', level: 2 })).toBeVisible();
+    await expect(page.getByLabel('Invitar un veedor de campo')).toHaveCount(0);
+    const administrators = page.locator('[data-test="administrators"]');
+    const email = `e2e.coadmin.${Date.now()}@correo.co`;
+
+    await administrators.getByLabel('Nombre').fill('Ana Pérez');
+    await administrators.getByLabel('Correo electrónico').fill(email);
+    await administrators.getByRole('button', { name: 'Invitar administrador' }).click();
+
+    await expect(page.getByRole('status')).toHaveText(`Invitación enviada a ${email}. El enlace vence en 48 horas.`);
+    await expect(administrators).toContainText('Ana Pérez');
+});
+
+test('Ve su territorio, sus contratos y sus obras', async ({ page }) => {
+    await enter(page, 'territory');
+    await expect(page.getByText('Magdalena').first()).toBeVisible();
+
+    await page.goto(`${ORG}/admin/contracts`);
+    await expect(page.getByRole('heading', { name: 'Contratos', exact: true })).toBeVisible();
+    await expect(page.getByText('Número de proceso').first()).toBeVisible();
+
+    await page.goto(`${ORG}/admin/worksites`);
+    await expect(page.getByText(WORKSITE).first()).toBeVisible();
+});
+
+test('Descarga el expediente de una obra, para el derecho de petición y la denuncia (it. 44b)', async ({ page }) => {
+    await enter(page, 'worksites');
+
+    const downloading = page.waitForEvent('download');
+    await page.getByRole('link', { name: 'Descargar expediente' }).first().click();
+    expect((await downloading).suggestedFilename()).toMatch(/^expediente-.+-\d{4}-\d{2}-\d{2}\.zip$/);
+
+    // Cada descarga queda en el log de auditoría.
+    await page.goto(`${ORG}/admin/audit`);
+    await expect(page.getByText(/descargó el expediente de una obra/).first()).toBeVisible();
+
+    // It. 46d: se filtra por tipo de acción y por quién; "Quitar filtros" lo muestra todo otra vez.
+    await page.getByLabel('Tipo de acción').selectOption({ label: 'Cuentas e invitaciones' });
+    await page.getByLabel('Quién lo hizo').fill('Nadie con este nombre');
+    await page.getByRole('button', { name: 'Filtrar' }).click();
+    await expect(page.getByText('Ninguna entrada cumple esos filtros.')).toBeVisible();
+    await page.getByRole('button', { name: 'Quitar filtros' }).click();
+    await expect(page.getByText(/descargó el expediente de una obra/).first()).toBeVisible();
+});
+
+test('Cuida la identidad de la organización y sigue el resumen y la auditoría', async ({ page }) => {
+    await enter(page, 'organization');
+    await expect(page.getByLabel('Nombre de fantasía')).toHaveValue('Veeduría de Pruebas E2E');
+
+    await page.goto(`${ORG}/admin/summary`);
+    await expect(page.getByRole('heading', { name: 'Resumen del territorio', exact: true })).toBeVisible();
+
+    await page.goto(`${ORG}/admin/audit`);
+    await expect(page.getByRole('heading', { name: 'Registro de auditoría', exact: true })).toBeVisible();
+    await expect(page.getByText('Publicó una evidencia').first()).toBeVisible();
+});
+
+test('Publica el contacto de la veeduría en su sitio (V13, it. 43h)', async ({ page }) => {
+    await enter(page, 'organization');
+
+    await page.getByLabel('Correo de contacto').fill('contacto@veeduria-e2e.org');
+    await page.getByLabel('Teléfono de contacto (opcional)').fill('+57 300 123 4567');
+    await page.getByRole('button', { name: 'Guardar cambios' }).click();
+    await expect(page.getByRole('status')).toContainText('Los cambios fueron guardados');
+});
+
+test('Autoriza al Super Administrador por 30 días y revoca la autorización', async ({ page }) => {
+    await enter(page, 'authorization');
+
+    await page.getByRole('button', { name: 'Autorizar por 30 días' }).click();
+    await expect(page.getByText(/puede crear reportes en nombre de la organización/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Revocar autorización' }).click();
+    await expect(page.getByText(/Autorización revocada\./)).toBeVisible();
+});
+
+test('V9: le llega un resumen diario con las evidencias por revisar (it. 43i)', async () => {
+    // El fixture de make e2e lo envía al preparar la organización, como lo haría el de las 07:00.
+    // El asunto va codificado en el correo (MIME); el cuerpo, legible.
+    const digest = await latestMailAbout(PEOPLE.admin, 'esperan su revisión');
+
+    expect(digest).toContain('evidencias de sus veedores esperan su revisión');
+    expect(digest).toContain('/admin/inbox');
+});
+
+test('Cierra la sesión desde el menú de su cuenta (V1)', async ({ page }) => {
+    await enter(page);
+
+    await logOut(page);
+});

@@ -1,0 +1,169 @@
+<script setup>
+// US-059-LEG (it. 44f): informar a la veeduría lo que se vio en una obra —
+// su deber es recibirlo (Ley 850 de 2003, art. 18) —, sin cuenta y en dos
+// pasos: el correo, que se verifica con un código, y después el código, el
+// mensaje y una foto opcional, que el navegador limpia como la del veedor.
+// El informe no se sella ni se publica.
+// It. 58: también de un contrato sin ficha (contractId), y, si la obra no tiene
+// ubicación (proposeFrom: dónde empieza el mapa), el ciudadano puede marcar
+// dónde queda. Es el lugar de la obra, no el suyo: lo marca en el mapa, no sale
+// del GPS del teléfono. La veeduría lo confirma antes de ponerla en el mapa.
+import { computed, ref } from 'vue';
+import EvidencePicker from '@/Components/EvidencePicker.vue';
+import LocationMap from '@/Components/LocationMap.vue';
+import PlaceSearch from '@/Components/PlaceSearch.vue';
+import { requestCitizenCode, sendCitizenReport } from '@/services/api.js';
+import { errorMessage } from '@/services/errors.js';
+import { vReveal } from '@/lib/reveal.js';
+
+const props = defineProps({
+    worksiteId: { type: String, default: null }, // it. 46c: su identificador público
+    contractId: { type: String, default: null }, // it. 58: el contrato, si aún no tiene ficha
+    proposeFrom: { type: Object, default: null }, // it. 58: { latitude, longitude }, si la obra no tiene ubicación
+});
+
+// It. 58: la obra de la que se informa — su ficha o, si no tiene, su contrato.
+const work = () => (props.worksiteId ? { worksite_id: props.worksiteId } : { contract_id: props.contractId });
+
+const MIN_MESSAGE = 20;
+const MAX_MESSAGE = 2000;
+const step = ref('email'); // email → code → sent
+const email = ref('');
+const authorized = ref(false);
+const code = ref('');
+const message = ref('');
+const photos = ref([]); // it. 46h: de 1 a 3, ya revisadas y con los rostros difuminados (EvidencePicker)
+const preparing = ref(false);
+const busy = ref(false);
+const notice = ref(null);
+const refused = ref(null);
+const number = ref(null);
+const commitment = ref(null); // it. 66a: hasta cuándo se compromete a responder la veeduría
+const place = ref(null); // it. 58: { latitude, longitude } donde el ciudadano dice que queda la obra
+const placeReference = ref(''); // it. 68: lo que escribió para encontrarla; llega a la veeduría aunque no elija un lugar
+const remaining = computed(() => MAX_MESSAGE - message.value.length);
+
+async function askForCode() {
+    refused.value = !/^\S+@\S+\.\S+$/.test(email.value.trim())
+        ? 'Escriba un correo válido: allí le llega el código.'
+        : !authorized.value
+          ? 'Para informar a la veeduría, autorice el tratamiento de sus datos personales.'
+          : null;
+    if (refused.value) {
+        return;
+    }
+    busy.value = true;
+    try {
+        notice.value = (await requestCitizenCode({ email: email.value.trim(), ...work(), data_authorization: true })).message;
+        step.value = 'code';
+    } catch (failure) {
+        refused.value = errorMessage(failure);
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function send() {
+    refused.value = !/^\d{6}$/.test(code.value.trim())
+        ? 'Escriba el código de 6 dígitos que le llegó al correo.'
+        : message.value.trim().length < MIN_MESSAGE
+          ? `Cuéntele a la veeduría qué vio: al menos ${MIN_MESSAGE} caracteres.`
+          : null;
+    if (refused.value) {
+        return;
+    }
+    const form = new FormData();
+    form.append('email', email.value.trim());
+    form.append('code', code.value.trim());
+    for (const [field, value] of Object.entries(work())) {
+        form.append(field, String(value));
+    }
+    form.append('message', message.value.trim());
+    if (place.value) {
+        form.append('latitude', String(place.value.latitude));
+        form.append('longitude', String(place.value.longitude));
+    }
+    if (placeReference.value.trim()) {
+        form.append('place_reference', placeReference.value.trim());
+    }
+    for (const photo of photos.value) {
+        form.append('photos[]', photo.file);
+    }
+    busy.value = true;
+    try {
+        const answer = await sendCitizenReport(form);
+        notice.value = answer.message;
+        number.value = answer.number;
+        commitment.value = answer.commitment ?? null;
+        step.value = 'sent';
+    } catch (failure) {
+        refused.value = errorMessage(failure);
+    } finally {
+        busy.value = false;
+    }
+}
+
+function startOver() {
+    step.value = 'email';
+    code.value = '';
+    refused.value = null;
+    notice.value = null;
+}
+
+const FIELD = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base';
+const BUTTON = 'min-h-12 rounded-xl bg-brand-700 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-800 disabled:opacity-40';
+</script>
+
+<template>
+    <!-- It. 40e: una invitación cálida, en terracota, distinta de las tarjetas de la obra. -->
+    <section id="informar" aria-labelledby="informar-title" class="mt-6 flex flex-col gap-3 rounded-2xl border-l-8 border-warm-500 bg-warm-50 p-5 text-base shadow-soft">
+        <h2 id="informar-title" class="text-lg font-semibold">Informar a esta veeduría</h2>
+        <p>¿Vio algo en esta obra? Cuénteselo a la veeduría: la ley la obliga a recibir lo que le informen los ciudadanos (Ley 850 de 2003, art. 18). No hace falta tener cuenta.</p>
+
+        <!-- It. 62d: la respuesta sale aquí arriba, y "Enviar" está abajo: se trae a la vista. -->
+        <p v-if="notice" v-reveal="notice" role="status" class="rounded-lg bg-emerald-50 p-3 font-semibold text-emerald-800">{{ notice }}</p>
+        <p v-if="refused" v-reveal="refused" role="alert" class="rounded-lg bg-red-50 p-3 text-red-800">{{ refused }}</p>
+
+        <template v-if="step === 'email'">
+            <label for="citizen-email" class="font-semibold">Su correo</label>
+            <input id="citizen-email" v-model="email" type="email" autocomplete="email" :class="FIELD" />
+            <p class="text-sm text-slate-700">Le llega un código para comprobar que es suyo. La veeduría no ve su correo: le responde desde GovTrace.</p>
+            <label for="citizen-authorization" class="flex min-h-11 items-start gap-3 font-semibold">
+                <input id="citizen-authorization" v-model="authorized" type="checkbox" class="mt-0.5 size-6 shrink-0" />
+                Autorizo el tratamiento de mis datos personales según la política.
+            </label>
+            <a data-test="data-policy" href="/privacidad" target="_blank" rel="noopener" class="inline-flex min-h-11 items-center self-start font-semibold underline">Lea la política de tratamiento de datos</a>
+            <button type="button" :disabled="busy" :class="BUTTON" @click="askForCode">Enviarme el código</button>
+        </template>
+
+        <template v-else-if="step === 'code'">
+            <label for="citizen-code" class="font-semibold">El código que le llegó al correo</label>
+            <input id="citizen-code" v-model="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" :class="FIELD" />
+            <label for="citizen-message" class="font-semibold">¿Qué vio en la obra?</label>
+            <textarea id="citizen-message" v-model="message" rows="4" :maxlength="MAX_MESSAGE" :class="FIELD"></textarea>
+            <p class="text-sm text-slate-700">{{ remaining }} caracteres disponibles.</p>
+            <!-- It. 46h: el mismo selector del veedor — la cámara y la galería, y cada foto se revisa con los rostros ya difuminados. -->
+            <EvidencePicker v-model="photos" v-model:processing="preparing" :max="3" photos-only label="Fotos (opcional): hasta 3" />
+            <p class="text-sm text-slate-700">Se les quitan la ubicación y los datos del teléfono antes de enviarlas, y los rostros de las personas se difuminan.</p>
+            <!-- It. 58: una obra sin ubicación — el ciudadano puede decir dónde queda. -->
+            <fieldset v-if="proposeFrom" data-test="propose-place" class="flex flex-col gap-2">
+                <legend class="font-semibold">¿Dónde queda la obra? (opcional)</legend>
+                <p class="text-sm text-slate-700">Esta obra aún no está en el mapa. Si sabe dónde queda, escriba la dirección o un sitio conocido y búsquelo, o márquela en el mapa: toque el mapa o mueva el punto. Es el lugar de la obra, no el suyo. La veeduría lo revisa antes de ponerla en el mapa.</p>
+                <!-- It. 68: el lugar elegido pone el punto en el mapa; lo escrito llega a la veeduría. -->
+                <PlaceSearch v-model="placeReference" :work="work()" @found="(point) => (place = point)" />
+                <button v-if="!place" type="button" class="min-h-12 self-start rounded-xl border-2 border-brand-700 bg-white px-4 font-semibold text-brand-800 hover:bg-brand-50" @click="place = { ...proposeFrom }">Marcar dónde queda la obra</button>
+                <template v-else>
+                    <LocationMap v-model="place" tap-to-move label="Donde queda la obra" />
+                    <button type="button" class="inline-flex min-h-11 items-center self-start font-semibold underline" @click="place = null">Quitar la ubicación</button>
+                </template>
+            </fieldset>
+            <button type="button" :disabled="busy || preparing" :class="BUTTON" @click="send">Enviar a la veeduría</button>
+            <button type="button" class="inline-flex min-h-11 items-center self-start font-semibold underline" @click="startOver">Pedir otro código</button>
+        </template>
+
+        <template v-else-if="number">
+            <p class="font-semibold">Su informe es el n.º {{ number }}. Le llegó también a su correo.</p>
+            <p v-if="commitment" data-test="commitment">{{ commitment }}</p>
+        </template>
+    </section>
+</template>

@@ -1,0 +1,65 @@
+// Iteración 41 — la CSP en un Chromium de verdad (R-TST-03). Pest ve que la
+// cabecera está; solo un navegador ve lo que ella deja cargar: el mapa y sus
+// imágenes, Leaflet, el Service Worker, las vistas previas de las fotos. Aquí,
+// ninguna pantalla pública ni del veedor provoca una sola violación.
+import { fileURLToPath } from 'node:url';
+import { expect, test } from '@playwright/test';
+import { attachPhoto, worksiteUrl } from './flujos/support.js';
+
+const FACE = fileURLToPath(new URL('../fixtures/evidence/rostro-pintura.jpg', import.meta.url));
+
+/** Every CSP violation of the page, from before its first script runs. */
+async function watchViolations(page) {
+    const violations = [];
+    await page.exposeFunction('reportCspViolation', (violation) => violations.push(violation));
+    await page.addInitScript(() => {
+        document.addEventListener('securitypolicyviolation', (event) =>
+            window.reportCspViolation(`${event.violatedDirective} bloqueó ${event.blockedURI} (${event.sourceFile}:${event.lineNumber})`),
+        );
+    });
+    page.on('console', (message) => {
+        if (/Content Security Policy/i.test(message.text())) {
+            violations.push(message.text());
+        }
+    });
+
+    return violations;
+}
+
+test('La CSP no bloquea nada en las pantallas públicas ni en las del veedor', async ({ page }) => {
+    const violations = await watchViolations(page);
+
+    // La cabecera está: si no, no habría nada que probar.
+    const response = await page.goto('/');
+    expect(response.headers()['content-security-policy']).toContain("img-src 'self' data: blob: https://tile.openstreetmap.org");
+
+    // El mapa público pide sus imágenes a OpenStreetMap (que respondan depende de internet; que se pidan, de la CSP).
+    await expect(page.locator('img.leaflet-tile').first()).toBeAttached({ timeout: 30_000 });
+    await page.goto(await worksiteUrl(page.request));
+    // It. 62: el nombre también va en la ruta, que en el celular se resume en "← …".
+    await expect(page.getByRole('heading', { level: 1, name: 'Parque de pruebas sin conexión' })).toBeVisible();
+    await page.goto('/stats');
+    await page.goto('/verify');
+    await expect(page.getByRole('heading', { name: 'Validador de evidencias' })).toBeVisible();
+
+    // El veedor: su Service Worker, la búsqueda, el GPS y la vista previa de una foto.
+    // It. 48: el detector de rostros corre en WebAssembly (SIMD), con el binario de GovTrace; sin él volvería, callado, a la CPU: 20 veces más lento.
+    const wasm = [];
+    page.on('response', (response) => /\/build\/assets\/tfjs-backend-wasm-simd-[\w-]+\.wasm$/.test(response.url()) && response.ok() && wasm.push(response.url()));
+    await page.goto('/login');
+    await page.getByLabel('Correo electrónico').fill('e2e.veedor@correo.co');
+    await page.getByLabel('Contraseña').fill('Veeduria#2026');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await page.waitForURL('**/reports/new');
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.getByLabel('Buscar Obra').fill('Parque de pruebas');
+    await page.locator('[data-test="contract-result"]').filter({ hasText: 'Parque de pruebas' }).first().click();
+    await expect(page.getByText(/Precisión del GPS/)).toBeVisible();
+    // It. 46e: la foto pasa por el detector de rostros (TF.js y su modelo, de GovTrace) sin que la CSP lo bloquee; it. 48, en WebAssembly.
+    await attachPhoto(page, FACE);
+    await expect(page.getByRole('button', { name: 'Enviar Reporte' })).toBeVisible();
+    expect(wasm).not.toHaveLength(0);
+    await page.goto('/my-reports');
+
+    expect(violations).toEqual([]);
+});

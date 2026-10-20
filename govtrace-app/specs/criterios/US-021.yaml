@@ -1,0 +1,23 @@
+story_id: "US-021"
+titulo_historia: "Como Sistema quiero aplicar reintentos con retraso exponencial si el nodo RPC falla, hay congestión o la transacción queda pending/dropped, para que ningún reporte quede huérfano de su sello"
+bloque: "B7 — Sellado"
+criterios_aceptacion:
+  escenarios_exito:
+    - "Ante una falla de la red de Stellar (RPC caído, transacción rechazada o no incluida en 5 minutos), el sellado se reintenta con retraso creciente: 1 min, 5 min, 15 min y 1 h, hasta 5 intentos"
+  validaciones_reglas:
+    - "Máximo 5 intentos de sellado por evidencia"
+    - "Si la red de Stellar no confirma una transacción en 5 minutos, el sellado vuelve a la cola y reintenta con esta misma política (R-INT-01). La patrocinadora sin saldo pausa el sellado sin gastar intentos (US-020b)"
+  manejo_errores:
+    - {caso: "Falla el quinto intento", resultado: "La evidencia queda en estado 'Falla de Sellado'. El veedor no ve ningún error"}
+    - {caso: "Hay evidencias en 'Falla de Sellado' en la organización", mensaje: "Alerta: [N] evidencias no se pudieron certificar de forma segura. El soporte técnico de GovTrace tiene que revisarlas.", donde: "banner rojo en el panel del Administrador de Organización"}
+    - {caso: "Una evidencia lleva más de 2 horas 'En Cola'", resultado: "Se alerta al Super Administrador y al Administrador de la organización afectada", mensaje: "⚠️ Aviso: hay evidencias que llevan más de 2 horas en fila para ser certificadas de forma segura. GovTrace sigue intentándolo solo; ninguna se pierde."}
+  requisitos_ux:
+    - "El veedor no ve errores de sellado"
+  casos_edge:
+    - {caso: "Llegan varias evidencias a la vez, de una o de varias organizaciones (una ráfaga, o los reportes sin conexión que se envían al volver la señal)", resultado: "La cuenta selladora admite una sola transacción pendiente a la vez: cada sello espera su turno unos segundos y se envía cuando el anterior entra en un ledger. Esperar el turno no es una falla: no gasta intentos, y ninguna evidencia queda en 'Falla de Sellado' por eso (it. 39)"}
+validacion_smart:
+  specific: true
+  measurable: true
+  achievable: true
+  relevant: true
+  testable: true

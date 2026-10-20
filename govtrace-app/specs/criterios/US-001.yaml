@@ -1,0 +1,32 @@
+story_id: "US-001"
+titulo_historia: "Como Super Administrador quiero dar de alta una nueva organización (tenant) validando sus datos legales (NIT y nombre) y asignándole su subdominio para habilitar su acceso de forma controlada y prevenir suplantaciones o spam"
+bloque: "B1 — Alta y gobierno de organizaciones"
+criterios_aceptacion:
+  escenarios_exito:
+    - "El Super Administrador ingresa al panel global y provee NIT oficial, nombre de la organización y subdominio deseado"
+    - "Al enviar, el sistema valida los datos, crea la instancia del tenant y el subdominio queda habilitado para responder peticiones"
+    - "La organización queda aprobada y activa (no existe paso de aprobación separado)"
+  validaciones_reglas:
+    - "(It. 51, 2026-10-10; pedido por el usuario) El subdominio sale del nombre de la veeduría con Str::slug() (sin tildes ni eñe, en minúsculas, con guiones), cortado a 63 caracteres (el límite del DNS) sin guion al final. El formulario lo propone mientras se escribe el nombre y el Super Administrador lo puede ajustar antes de registrar (decisión del usuario); sin uno escrito, el servidor lo calcula. Uno escrito se respeta y se valida como siempre (si está tomado, error); uno calculado que ya existe toma -2, -3… Un nombre cuyo slug es una palabra reservada, o sin letras, se rechaza con el mensaje de siempre. Las veedurías ya creadas no se tocan, y el subdominio no cambia una vez registrada (R-SA-03)"
+    - "NIT: numérico, con dígito de verificación OBLIGATORIO, comprobado con el algoritmo oficial de la DIAN (se rechaza si no coincide), y único en la base de datos"
+    - "Subdominio: solo minúsculas, números y guiones medios (^[a-z0-9-]+$), mínimo 3 caracteres, único"
+    - "Subdominio: no puede ser una palabra reservada del sistema: api, admin, app, www, auth, assets"
+    - "Nombre de la organización: obligatorio, texto plano, entre 3 y 150 caracteres"
+    - "R-SA-03: el subdominio lo asigna el Super Administrador en el alta"
+  manejo_errores:
+    - {caso: "NIT duplicado", mensaje: "Ya existe una organización registrada con el NIT ingresado."}
+    - {caso: "NIT sin dígito de verificación o con DV que no coincide", mensaje: "El NIT ingresado no es válido o el dígito de verificación no coincide con el algoritmo de la DIAN."}
+    - {caso: "Subdominio duplicado", mensaje: "El subdominio especificado ya no está disponible. Por favor elija otro."}
+    - {caso: "Subdominio con formato incorrecto", mensaje: "El subdominio solo puede contener letras minúsculas, números y guiones, sin espacios ni caracteres especiales."}
+    - {caso: "Subdominio es palabra reservada", mensaje: "El subdominio utiliza una palabra reservada del sistema y no puede ser utilizado."}
+  requisitos_ux: []
+  casos_edge:
+    - "It. 44d (A5): una veeduría sin NIT se registra con su inscripción — el número de la resolución o el acta y la entidad que la registró, una personería o una cámara de comercio (Ley 850 de 2003, art. 3) —; una organización tiene su NIT, su inscripción o los dos, nunca ninguno (R-LEG-06)"
+    - "Dos inscripciones son la misma aunque se escriban con otras mayúsculas, tildes o espacios; la misma resolución de otra personería es otra inscripción"
+    - "(It. 46b, 2026-10-02, decidido por el usuario) En la nueva organización, el Super Administrador consulta los datos abiertos del RUES por el NIT (o por la matrícula, si la inscribió una cámara de comercio) antes de registrarla; al registrarla, el log de auditoría guarda lo que dijo el RUES. La decisión sigue siendo suya"
+validacion_smart:
+  specific: true
+  measurable: true
+  achievable: true
+  relevant: true
+  testable: true

@@ -65,8 +65,8 @@ Cada comando debe responder con un número de versión. Si alguno dice `command 
 2. Abre la terminal (en Windows, **Ubuntu**), copia estas líneas, pégalas (clic derecho → Pegar) y presiona Enter:
    ```
    cd ~
-   git clone https://github.com/cristhianbarros/govtrace-app.git
-   cd govtrace-app
+   git clone https://github.com/cristhianbarros/GovTrace.git
+   cd GovTrace/govtrace-app
    make setup
    ```
 3. Espera. La primera vez descarga y prepara todo, y puede tardar de 10 a 30 minutos según tu internet. Termina cuando la terminal vuelve a aceptar comandos. Si ves un mensaje con `✘` o `Error`, revisa [Si algo falla](#si-algo-falla).
@@ -89,7 +89,7 @@ Esto se hace una sola vez.
    | Veedor | http://veeduria-demo.govtrace.localhost:8080 | `ana.torres@correo.co` | `Demo#2026Veedor` |
 
    El sitio público (mapa, obras y validador) está en http://veeduria-demo.govtrace.localhost:8080 y no pide cuenta.
-3. Para apagarlo: `make down`. Para volver a encenderlo otro día: abre Docker Desktop y la terminal, y ejecuta `cd ~/govtrace-app` y `make demo`.
+3. Para apagarlo: `make down`. Para volver a encenderlo otro día: abre Docker Desktop y la terminal, y ejecuta `cd ~/GovTrace/govtrace-app` y `make demo`.
 
 ### Si algo falla
 

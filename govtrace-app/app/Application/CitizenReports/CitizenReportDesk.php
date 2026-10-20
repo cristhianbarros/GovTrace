@@ -1,0 +1,237 @@
+<?php
+
+namespace App\Application\CitizenReports;
+
+use App\Application\Privacy\DataPolicy;
+use App\Application\Publication\PublicCache;
+use App\Domain\CitizenReports\CitizenReport;
+use App\Domain\CitizenReports\CitizenReportCode;
+use App\Domain\CitizenReports\CitizenReportSupport;
+use App\Domain\CitizenReports\Notifications\CitizenReportCode as CodeMail;
+use App\Domain\CitizenReports\Notifications\CitizenReportReceived;
+use App\Domain\Configuration\Parameters;
+use App\Domain\Contracts\Contract;
+use App\Domain\Geography\GeoPoint;
+use App\Domain\Geography\Municipality;
+use App\Domain\Geography\PlaceName;
+use App\Domain\Organization\OrganizationStatus;
+use App\Domain\Reports\JpegMetadata;
+use App\Domain\Worksites\Worksite;
+use Carbon\CarbonImmutable;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+/**
+ * US-059-LEG (it. 44f): where a citizen informs the veeduría (Ley 850 de 2003,
+ * art. 18 a)). First a 6-digit code to their email — the proof it is theirs,
+ * and the barrier against spam —, then the report with that code. Nothing is
+ * sealed nor published (R-LEG-09), and the email is kept encrypted: the
+ * veeduría answers through GovTrace, never seeing it (R-LEG-10).
+ *
+ * Inside the organization.
+ */
+class CitizenReportDesk
+{
+    public const CODES_PER_HOUR = 3;
+
+    public const REPORTS_PER_DAY = 3;
+
+    public const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+    public function requestCode(string $email, bool $authorized): void
+    {
+        $this->assertReceiving();
+        if (! $authorized) {
+            throw CitizenReportRefused::authorizationRequired();
+        }
+
+        $hash = self::fingerprint($email);
+        if (CitizenReportCode::query()->where('email_hash', $hash)->where('created_at', '>=', now()->subHour())->count() >= self::CODES_PER_HOUR) {
+            throw CitizenReportRefused::tooManyCodes(self::CODES_PER_HOUR);
+        }
+
+        $code = str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+        DB::transaction(function () use ($hash, $code) {
+            // Un código nuevo anula los anteriores.
+            CitizenReportCode::query()->where('email_hash', $hash)->whereNull('used_at')->update(['used_at' => now()]);
+            CitizenReportCode::query()->create([
+                'email_hash' => $hash,
+                'code_hash' => self::fingerprint($code),
+                'expires_at' => now()->addMinutes(CitizenReportCode::VALID_MINUTES),
+                'data_authorized_at' => now(),
+            ]);
+        });
+
+        Notification::route('mail', self::normalized($email))->notify(new CodeMail($code, tenant()->displayName(), CitizenReportCode::VALID_MINUTES));
+    }
+
+    /**
+     * @param  list<UploadedFile>  $photos  from 1 to 3, or none (it. 46h)
+     * @param  GeoPoint|null  $proposed  it. 58: where the citizen says a work without location is
+     */
+    public function receive(string $email, string $code, ReportedWork $work, string $message, array $photos = [], ?GeoPoint $proposed = null, ?string $placeReference = null): CitizenReport
+    {
+        $this->assertReceiving();
+        $hash = self::fingerprint($email);
+        $pending = $this->verify($hash, $code);
+
+        $today = CitizenReport::query()->where('email_hash', $hash)->where('created_at', '>=', now()->startOfDay());
+        if ((clone $today)->count() >= self::REPORTS_PER_DAY) {
+            throw CitizenReportRefused::dailyLimit(self::REPORTS_PER_DAY);
+        }
+        if ($work->worksite !== null && (clone $today)->where('worksite_id', $work->worksite->id)->exists()) {
+            throw CitizenReportRefused::alreadyToday();
+        }
+        if (count($photos) > CitizenReport::MAX_PHOTOS) {
+            throw CitizenReportRefused::tooManyPhotos(CitizenReport::MAX_PHOTOS);
+        }
+        // Todas se revisan antes de guardar una: un informe con una foto mala no deja ninguna.
+        array_map($this->assertCleanPhoto(...), $photos);
+        // It. 58: solo una obra sin ubicación la recibe. Si la obtuvo mientras tanto, el informe llega sin ella.
+        $proposed = $work->isLocated() ? null : $proposed;
+        if ($proposed !== null) {
+            $this->assertNearItsMunicipality($work, $proposed);
+        }
+        // It. 68: lo que escribió para ubicarla, también solo para una obra sin ubicación.
+        $placeReference = $work->isLocated() ? null : (trim((string) $placeReference) ?: null);
+
+        $report = DB::transaction(function () use ($pending, $hash, $email, $work, $message, $photos, $proposed, $placeReference) {
+            $pending->update(['used_at' => now()]);
+
+            return CitizenReport::query()->create([
+                'worksite_id' => $work->sheetForReport()->id,
+                'email' => self::normalized($email),
+                'email_hash' => $hash,
+                'message' => trim($message),
+                'photo_paths' => array_map($this->store(...), $photos),
+                'data_authorized_at' => $pending->data_authorized_at,
+                'data_policy_version' => DataPolicy::VERSION,
+                'proposed_latitude' => $proposed?->latitude,
+                'proposed_longitude' => $proposed?->longitude,
+                'place_reference' => $placeReference,
+                // It. 66a (R-LEG-12): con el plazo de la veeduría de hoy; cambiarlo después no lo cambia.
+                'due_on' => CitizenResponseDeadline::dueFrom(CarbonImmutable::now(), tenant()->citizenResponseDays())->toDateString(),
+            ]);
+        });
+
+        // It. 66b: la obra dice cuántos ciudadanos informaron.
+        PublicCache::forget();
+        $commitment = CitizenResponseDeadline::sentence(CarbonImmutable::parse($report->due_on), tenant()->citizenResponseDays());
+        Notification::route('mail', self::normalized($email))->notify(new CitizenReportReceived($report->reference(), tenant()->displayName(), self::nameOf($report->worksite), $commitment));
+
+        return $report;
+    }
+
+    /**
+     * It. 66b (US-069): "Yo también lo vi" — the citizen joins what was already reported
+     * of the work (its newest open report), with the verified email and the
+     * authorization given with the code. Once per person and work.
+     */
+    public function support(string $email, string $code, Worksite $worksite): CitizenReport
+    {
+        $this->assertReceiving();
+        $hash = self::fingerprint($email);
+        $pending = $this->verify($hash, $code);
+
+        $reports = CitizenReport::query()->where('worksite_id', $worksite->id)->where('status', '!=', 'discarded');
+        $open = (clone $reports)->whereIn('status', ['new', 'assigned'])->latest('id')->first() ?? throw CitizenReportRefused::nothingOpen();
+        $already = (clone $reports)->where('email_hash', $hash)->exists()
+            || CitizenReportSupport::query()->where('email_hash', $hash)->whereIn('citizen_report_id', (clone $reports)->select('id'))->exists();
+        if ($already) {
+            throw CitizenReportRefused::alreadyInformed();
+        }
+
+        DB::transaction(function () use ($pending, $open, $email, $hash) {
+            $pending->update(['used_at' => now()]);
+            $open->supports()->create([
+                'email' => self::normalized($email),
+                'email_hash' => $hash,
+                'data_authorized_at' => $pending->data_authorized_at,
+                'data_policy_version' => DataPolicy::VERSION,
+            ]);
+        });
+        // Lo público cambió: la obra cuenta a uno más.
+        PublicCache::forget();
+
+        return $open;
+    }
+
+    /** The name a worksite goes by: its own, or its first contract's object. */
+    public static function nameOf(Worksite $worksite): string
+    {
+        return $worksite->name
+            ?? Contract::query()->whereIn('secop_contract_id', $worksite->contracts()->pluck('secop_contract_id'))->orderBy('secop_contract_id')->value('object')
+            ?? 'Obra';
+    }
+
+    /** The email, or a code, as an HMAC with the app key: comparable, not reversible. */
+    public static function fingerprint(string $value): string
+    {
+        return hash_hmac('sha256', self::normalized($value), (string) config('app.key'));
+    }
+
+    private static function normalized(string $email): string
+    {
+        return Str::lower(trim($email));
+    }
+
+    public function assertReceiving(): void
+    {
+        if (tenant()->status === OrganizationStatus::Suspended->value) {
+            throw CitizenReportRefused::suspended();
+        }
+    }
+
+    /** The newest unused code of that email; a wrong one counts, and the fifth voids it. */
+    private function verify(string $hash, string $code): CitizenReportCode
+    {
+        $pending = CitizenReportCode::query()->where('email_hash', $hash)->whereNull('used_at')->latest('id')->first();
+        if ($pending === null || $pending->expires_at->isPast()) {
+            throw CitizenReportRefused::invalidCode();
+        }
+        if (! hash_equals($pending->code_hash, self::fingerprint($code))) {
+            $pending->attempts++;
+            if ($pending->attempts >= CitizenReportCode::MAX_ATTEMPTS) {
+                $pending->used_at = now();
+            }
+            $pending->save();
+
+            throw CitizenReportRefused::invalidCode();
+        }
+
+        return $pending;
+    }
+
+    private function assertCleanPhoto(UploadedFile $photo): void
+    {
+        if ($photo->getSize() > self::MAX_PHOTO_BYTES || $photo->getMimeType() !== 'image/jpeg') {
+            throw CitizenReportRefused::invalidPhoto();
+        }
+        // R-PRIV-01 y R-PRIV-06: como la de un veedor, sin la ubicación del teléfono.
+        if (JpegMetadata::carriesMetadata($photo->getRealPath())) {
+            throw CitizenReportRefused::photoWithMetadata();
+        }
+    }
+
+    /** It. 58: as far from the seat of the contract's municipality as a first report may anchor the work (R-GEO-01), no more. */
+    private function assertNearItsMunicipality(ReportedWork $work, GeoPoint $proposed): void
+    {
+        $seat = $work->contract !== null ? Municipality::seatFor($work->contract->municipality_code, $work->contract->department_code, $proposed) : null;
+        $kilometers = (int) Parameters::current('anchor_municipality_radius_km');
+
+        if ($seat !== null && $seat->seat()->distanceInMetersTo($proposed) > $kilometers * 1000) {
+            throw CitizenReportRefused::farFromMunicipality(PlaceName::forDisplay($seat->name), $kilometers);
+        }
+    }
+
+    private function store(UploadedFile $photo): string
+    {
+        $path = tenant()->getTenantKey().'/citizen-reports/'.hash_file('sha256', $photo->getRealPath()).'.jpg';
+        Storage::disk('evidencias')->put($path, file_get_contents($photo->getRealPath()));
+
+        return $path;
+    }
+}

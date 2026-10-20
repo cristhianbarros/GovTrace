@@ -1,0 +1,491 @@
+// Iteración 26 — US-017 y US-029 (UI): la vista pública de una obra — la
+// tarjeta de cada contrato, tal como viene de SECOP, y la línea de tiempo
+// de sus evidencias publicadas, con el visor de fotos, las lápidas y el
+// sello de cada una.
+import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import Worksite from './Worksite.vue';
+import CitizenReportForm from '@/Components/Public/CitizenReportForm.vue';
+import { formatDateTime } from '@/lib/format.js';
+import { validate } from '@/lib/validator.js';
+import { fetchReceipt, fetchWorksite, findProof } from '@/services/api.js';
+import { page } from '@/testing/inertia.js';
+
+vi.mock('@inertiajs/vue3', async () => await import('@/testing/inertia.js'));
+vi.mock('@/services/api.js');
+vi.mock('@/lib/validator.js', async (original) => ({ ...(await original()), validate: vi.fn() }));
+
+const TOMBSTONE = '🚫 Evidencia retirada por la organización por incumplimiento de políticas.';
+const STELLAR = { rpc_url: 'https://soroban-testnet.stellar.org', network_passphrase: 'Test SDF Network ; September 2015', contracts: ['CABXHM74HFSAZD4FDFDONSIDJOVJBU7ZJXYBCHY3JJDCQUDFTHBT2WUI'], explorer_url: 'https://stellar.expert/explorer/testnet' };
+const SEAL = { merkle_root: 'ab'.repeat(32), tx_hash: 'cd'.repeat(32), ledger: 61234567 };
+
+const contract = {
+    secop_contract_id: 'CO1.PCCNTR.1234567',
+    object: 'Pavimentación Calle 30',
+    entity_name: 'Alcaldía de Santa Marta',
+    contractor_name: 'Constructora Caribe S.A.S.',
+    value: '1250000000.00',
+    term_months: 8,
+    secop_url: 'https://community.secop.gov.co/Public/Tendering/OpportunityDetail/Index?noticeUID=CO1.NTC.1',
+    cancelled: false,
+    cancelled_notice: null,
+};
+
+const abandonment = {
+    report_id: '01j9xq3m7v8k2d4f6g8h0jkm12',
+    classification: 'Abandono',
+    captured_at: '2026-09-27T15:15:32+00:00',
+    comment: 'Obra detenida hace 2 meses',
+    approximate_location: { lat: 11.241, lng: -74.199 },
+    files: [{ id: 40, kind: 'photo', sha256: 'ef'.repeat(32), photo_url: '/public/evidences/40/photo', download_url: '/public/evidences/40/download', proof_url: '/public/evidences/40/proof' }],
+    seal: SEAL,
+    receipt_url: '/public/reports/12/receipt',
+};
+const withdrawn = { report_id: '01j9xq3m7v8k2d4f6g8h0jkm11', classification: 'Retraso', captured_at: '2026-09-20T13:00:00+00:00', notice: TOMBSTONE, seal: SEAL, receipt_url: '/public/reports/11/receipt' };
+const progress = {
+    ...abandonment,
+    report_id: '01j9xq3m7v8k2d4f6g8h0jkm10',
+    classification: 'Avance',
+    captured_at: '2026-09-10T14:00:00+00:00',
+    comment: 'Ya fundieron la primera losa',
+    files: [{ id: 30, kind: 'pdf', sha256: '12'.repeat(32), download_url: '/public/evidences/30/download', proof_url: '/public/evidences/30/proof' }],
+    receipt_url: '/public/reports/10/receipt',
+};
+
+const AT_RISK = { color: 'red', label: 'En riesgo', reason: 'El reporte publicado más reciente, del 27/09/2026, es de abandono.' };
+const calle30 = (changes = {}) => ({ id: '01j9xq3m7v8k2d4f6g8h0jkmnp', name: 'Pavimentación Calle 30', contracts: [contract], timeline: [abandonment, withdrawn, progress], condition: AT_RISK, ...changes });
+
+async function openWorksite(worksite = calle30()) {
+    fetchWorksite.mockResolvedValue(worksite);
+    const wrapper = mount(Worksite, { props: { worksiteId: '01j9xq3m7v8k2d4f6g8h0jkmnp' }, attachTo: document.body });
+    await flushPromises();
+    return wrapper;
+}
+
+const cards = (wrapper) => wrapper.findAll('[data-test="evidence"]');
+const button = (wrapper, text) => wrapper.findAll('button').find((candidate) => candidate.text() === text);
+
+beforeEach(() => {
+    vi.resetAllMocks();
+    page.props = { organization: 'Veeduría Ciudadana Santa Marta', organizationLogo: null, organizationNotice: null, stellar: STELLAR };
+});
+
+describe('Vista de obra — el contrato (US-017)', () => {
+    it('Tarjeta del contrato en la vista de la obra: entity, contractor, value, term and the SECOP original', async () => {
+        const wrapper = await openWorksite();
+        const card = wrapper.get('[data-test="contract"]');
+
+        expect(card.text()).toContain('Alcaldía de Santa Marta');
+        expect(card.text()).toContain('Constructora Caribe S.A.S.');
+        expect(card.text()).toContain('$1.250.000.000');
+        expect(card.text()).toContain('8 meses');
+        const secop = card.get('a');
+        expect(secop.text()).toBe('Ver original en SECOP');
+        expect(secop.attributes()).toMatchObject({ href: contract.secop_url, target: '_blank', rel: 'noopener noreferrer' });
+        wrapper.unmount();
+    });
+
+    it('Los datos se muestran tal como vienen de SECOP II', async () => {
+        const wrapper = await openWorksite(calle30({ contracts: [{ ...contract, contractor_name: 'Constructora Caribe SAS.' }] }));
+
+        expect(wrapper.get('[data-test="contract"]').text()).toContain('Constructora Caribe SAS.');
+        wrapper.unmount();
+    });
+
+    it('Contrato anulado en SECOP que ya tenía evidencias: the page stays, with its evidences and the notice', async () => {
+        const wrapper = await openWorksite(calle30({
+            contracts: [{ ...contract, cancelled: true, cancelled_notice: '⚠️ Contrato Anulado/Retirado en SECOP' }],
+            timeline: [abandonment, progress],
+        }));
+
+        expect(wrapper.get('[data-test="contract"]').text()).toContain('⚠️ Contrato Anulado/Retirado en SECOP');
+        expect(cards(wrapper)).toHaveLength(2);
+        wrapper.unmount();
+    });
+
+    it('shows every contract a worksite groups (US-045-INT)', async () => {
+        const wrapper = await openWorksite(calle30({ name: 'Acueducto Gaira', contracts: [contract, { ...contract, secop_contract_id: 'CO1.PCCNTR.3333333', object: 'Acueducto Gaira, fase 2' }] }));
+
+        expect(wrapper.get('h1').text()).toBe('Acueducto Gaira');
+        expect(wrapper.findAll('[data-test="contract"]')).toHaveLength(2);
+        wrapper.unmount();
+    });
+});
+
+describe('Vista de obra — la línea de tiempo (US-029)', () => {
+    it('Línea de tiempo cargada al hacer clic en el pin: each card with date, classification, comment, thumbnails and the seal button', async () => {
+        const wrapper = await openWorksite();
+
+        expect(fetchWorksite).toHaveBeenCalledWith('01j9xq3m7v8k2d4f6g8h0jkmnp');
+        expect(cards(wrapper)).toHaveLength(3);
+        const first = cards(wrapper)[0];
+        expect(first.text()).toContain(formatDateTime(abandonment.captured_at));
+        expect(first.text()).toContain('Abandono');
+        expect(first.text()).toContain('Obra detenida hace 2 meses');
+        expect(first.get('img').attributes()).toMatchObject({ src: '/public/evidences/40/photo', loading: 'lazy' });
+        expect(first.findAll('button').some((candidate) => candidate.text() === 'Comprobar que es original')).toBe(true);
+        wrapper.unmount();
+    });
+
+    it('Visor de fotos: touching a thumbnail opens the photo, and it closes', async () => {
+        const wrapper = await openWorksite();
+
+        await cards(wrapper)[0].get('[data-test="thumbnail"]').trigger('click');
+
+        const viewer = wrapper.get('[role="dialog"]');
+        expect(viewer.attributes('aria-modal')).toBe('true');
+        expect(viewer.get('img').attributes('src')).toBe('/public/evidences/40/photo');
+        await button(wrapper, 'Cerrar').trigger('click');
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+
+        await cards(wrapper)[0].get('[data-test="thumbnail"]').trigger('click');
+        await wrapper.get('[role="dialog"]').trigger('keydown', { key: 'Escape' });
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
+    it('Las coordenadas de cada evidencia se muestran aproximadas', async () => {
+        const wrapper = await openWorksite();
+
+        // It. 53: se dice con palabras; unas coordenadas con tres decimales parecen más precisas de lo que son.
+        expect(cards(wrapper)[0].text()).toContain('Ubicación aproximada, a unos 100 m del lugar.');
+        expect(cards(wrapper)[0].text()).not.toContain('11.241');
+        expect(cards(wrapper)[0].text()).not.toContain('-74.199');
+        wrapper.unmount();
+    });
+
+    it('Una evidencia retirada queda como lápida: without photos or comment, with its seal', async () => {
+        // Aunque una respuesta los trajera por error: una retirada puede mostrar a un menor identificable.
+        const leaky = { ...withdrawn, comment: 'Comentario que ya no debe verse', files: abandonment.files, approximate_location: { lat: 11.241, lng: -74.199 } };
+        const wrapper = await openWorksite(calle30({ timeline: [abandonment, leaky, progress] }));
+        const tombstone = cards(wrapper)[1];
+
+        expect(tombstone.text()).toContain(TOMBSTONE);
+        expect(tombstone.find('img').exists()).toBe(false);
+        expect(tombstone.text()).not.toContain('Comentario que ya no debe verse');
+        expect(tombstone.text()).not.toContain('Ubicación aproximada');
+        expect(tombstone.findAll('button').some((candidate) => candidate.text() === 'Comprobar que es original')).toBe(true);
+        wrapper.unmount();
+    });
+
+    it('offers the PDF of an evidence for download, as it was sealed', async () => {
+        const wrapper = await openWorksite();
+        const pdf = cards(wrapper)[2].get('a[data-test="download"]');
+
+        expect(pdf.text()).toBe('Descargar archivo original');
+        expect(pdf.attributes('href')).toBe('/public/evidences/30/download');
+        wrapper.unmount();
+    });
+
+    it('Descarga del archivo exacto y su prueba: a photo too has "Descargar archivo original", and its proof beside it', async () => {
+        const wrapper = await openWorksite();
+        const photo = cards(wrapper)[0];
+
+        expect(photo.get('a[data-test="download"]').text()).toBe('Descargar archivo original');
+        expect(photo.get('a[data-test="download"]').attributes('href')).toBe('/public/evidences/40/download');
+        expect(photo.get('a[data-test="proof"]').text()).toBe('Descargar su prueba');
+        expect(photo.get('a[data-test="proof"]').attributes('href')).toBe('/public/evidences/40/proof');
+        wrapper.unmount();
+    });
+
+    it('numbers the originals when an evidence has several files', async () => {
+        const second = { ...abandonment.files[0], id: 41, download_url: '/public/evidences/41/download', proof_url: '/public/evidences/41/proof' };
+        const wrapper = await openWorksite(calle30({ timeline: [{ ...abandonment, files: [abandonment.files[0], second] }] }));
+
+        expect(cards(wrapper)[0].findAll('a[data-test="download"]').map((link) => link.text())).toEqual(['Descargar archivo original (1 de 2)', 'Descargar archivo original (2 de 2)']);
+        wrapper.unmount();
+    });
+
+    it('Una evidencia retirada no se puede descargar: its tombstone has no download', async () => {
+        const leaky = { ...withdrawn, files: abandonment.files };
+        const wrapper = await openWorksite(calle30({ timeline: [abandonment, leaky, progress] }));
+
+        expect(cards(wrapper)[1].find('a[data-test="download"]').exists()).toBe(false);
+        expect(cards(wrapper)[1].find('a[data-test="proof"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
+    it('shows the seal of an evidence when "Comprobar que es original" is pressed, with the way to Stellar Expert', async () => {
+        fetchReceipt.mockResolvedValue({
+            sealed: true,
+            ...SEAL,
+            sealed_at: '2026-09-27T15:16:02+00:00',
+            contract_id: 'CAF2JUMJPPMHLXMO3HV4SOT3PSHXSYMAPRPM67FCT4F5UU3NCGKAT3VE',
+            explorer: { label: 'Ver en Stellar Expert', url: `https://stellar.expert/explorer/testnet/tx/${SEAL.tx_hash}` },
+        });
+        const wrapper = await openWorksite();
+
+        await cards(wrapper)[0].findAll('button').find((candidate) => candidate.text() === 'Comprobar que es original').trigger('click');
+        await flushPromises();
+
+        const seal = cards(wrapper)[0].get('[data-test="seal"]');
+        expect(fetchReceipt).toHaveBeenCalledWith('/public/reports/12/receipt');
+        expect(seal.text()).toContain(SEAL.merkle_root);
+        expect(seal.text()).toContain(SEAL.tx_hash);
+        expect(seal.text()).toContain('61234567');
+        expect(seal.text()).toContain(formatDateTime('2026-09-27T15:16:02+00:00'));
+        expect(seal.get('a').attributes()).toMatchObject({ href: `https://stellar.expert/explorer/testnet/tx/${SEAL.tx_hash}`, target: '_blank', rel: 'noopener noreferrer' });
+        expect(seal.get('a').text()).toBe('Ver en Stellar Expert');
+        wrapper.unmount();
+    });
+});
+
+describe('Vista de obra — el modo contextual del validador (US-024)', () => {
+    it('Modo contextual con un archivo alterado: compares a copy against THIS evidence, and shows the red banner', async () => {
+        fetchReceipt.mockResolvedValue({ sealed: false, message: 'pendiente' });
+        validate.mockResolvedValue({ verdict: 'altered', message: '❌ Archivo Alterado o Falso. Las huellas criptográficas no coinciden con la blockchain.' });
+        const wrapper = await openWorksite();
+        await cards(wrapper)[0].findAll('button').find((candidate) => candidate.text() === 'Comprobar que es original').trigger('click');
+        await flushPromises();
+
+        const copy = new File(['copia'], 'obra-gaira.jpg', { type: 'image/jpeg' });
+        const input = cards(wrapper)[0].get('input[data-test="file"]');
+        Object.defineProperty(input.element, 'files', { value: [copy], configurable: true });
+        await input.trigger('change');
+        await flushPromises();
+
+        expect(validate).toHaveBeenCalledWith(expect.objectContaining({ file: copy, mode: 'contextual', reportId: '01j9xq3m7v8k2d4f6g8h0jkm12', stellar: STELLAR, findProof }));
+        const banner = cards(wrapper)[0].get('[data-test="verdict"]');
+        expect(banner.attributes('role')).toBe('alert');
+        expect(banner.text()).toContain('❌ Archivo Alterado o Falso.');
+        wrapper.unmount();
+    });
+});
+
+describe('Vista de obra — estados', () => {
+    it('shows that it is loading the worksite', () => {
+        fetchWorksite.mockReturnValue(new Promise(() => {}));
+
+        expect(mount(Worksite, { props: { worksiteId: '01j9xq3m7v8k2d4f6g8h0jkmnp' } }).text()).toContain('Cargando la obra…');
+    });
+
+    it('says when it could not load it, and lets retry', async () => {
+        fetchWorksite.mockRejectedValueOnce(new Error('Network Error')).mockResolvedValueOnce(calle30());
+        const wrapper = mount(Worksite, { props: { worksiteId: '01j9xq3m7v8k2d4f6g8h0jkmnp' } });
+        await flushPromises();
+
+        expect(wrapper.get('[role="alert"]').text()).toContain('No se pudo conectar con el servidor.');
+        await button(wrapper, 'Reintentar').trigger('click');
+        await flushPromises();
+
+        expect(cards(wrapper)).toHaveLength(3);
+    });
+
+    it('says when the worksite has no published evidence yet', async () => {
+        const wrapper = await openWorksite(calle30({ timeline: [] }));
+
+        expect(wrapper.text()).toContain('Aún no hay evidencias publicadas de esta obra.');
+        expect(wrapper.find('[data-test="contract"]').exists()).toBe(true);
+        wrapper.unmount();
+    });
+
+    it('warns that the organization is suspended, and goes back to the map', async () => {
+        page.props.organizationNotice = '⚠️ Esta organización se encuentra suspendida temporalmente. Sus evidencias publicadas siguen disponibles solo para consulta.';
+
+        const wrapper = await openWorksite();
+
+        expect(wrapper.get('[role="status"]').text()).toContain('suspendida temporalmente');
+        // It. 62 (US-067): la ruta lleva de vuelta al mapa; ya no hay un "← Volver al mapa" aparte.
+        expect(wrapper.get('nav[aria-label="Ruta"] [data-test="back"]').attributes('href')).toBe('/');
+        expect(wrapper.findAll('a').some((link) => link.text().includes('Volver al mapa'))).toBe(false);
+        wrapper.unmount();
+    });
+
+    it('En una pantalla del sitio, la ruta suma la pantalla: the page of a worksite ends the trail with its name', async () => {
+        page.url = '/worksite/01j9xq3m7v8k2d4f6g8h0jkmnp';
+        const wrapper = await openWorksite();
+
+        const crumbs = wrapper.get('nav[aria-label="Ruta"] ol').findAll('[data-crumb]');
+        expect(crumbs.map((crumb) => crumb.text())).toEqual(['GovTrace', 'Veeduría Ciudadana Santa Marta', 'Pavimentación Calle 30']);
+        expect(crumbs[2].attributes('aria-current')).toBe('page');
+        wrapper.unmount();
+    });
+});
+
+describe('El estado de la obra (it. 40b)', () => {
+    it('La obra muestra su estado y por qué: its state with its sign, and the reason in words, right under its name', async () => {
+        const wrapper = await openWorksite();
+        const condition = wrapper.get('[data-test="condition"]');
+
+        expect(condition.attributes('data-color')).toBe('red');
+        expect(condition.text()).toContain('✕');
+        expect(condition.text()).toContain('En riesgo');
+        expect(condition.text()).toContain('El reporte publicado más reciente, del 27/09/2026, es de abandono.');
+        wrapper.unmount();
+    });
+});
+
+// It. 44a — US-055-LEG: el estado es una alerta de GovTrace, y los canales de la Contraloría.
+describe('Qué significa el estado, y cómo avisar a la Contraloría (it. 44a)', () => {
+    const ALERT = 'Es una alerta de GovTrace, calculada con los datos de SECOP II y las evidencias publicadas. No es la decisión de una autoridad.';
+    const NORMAL = { color: 'green', label: 'Normal', reason: 'Ningún reporte publicado habla de retraso o abandono, y el contrato está dentro del plazo.' };
+
+    it('El estado de una obra es una alerta de GovTrace: said under every state', async () => {
+        for (const condition of [AT_RISK, NORMAL]) {
+            const wrapper = await openWorksite(calle30({ condition }));
+
+            expect(wrapper.get('[data-test="condition"]').text()).toContain(ALERT);
+            wrapper.unmount();
+        }
+    });
+
+    it('En riesgo no es lo mismo que obra inconclusa: the legal definition, and a link to what one can do', async () => {
+        const wrapper = await openWorksite();
+        const condition = wrapper.get('[data-test="condition"]');
+
+        expect(condition.text()).toContain('«En riesgo» no es lo mismo que «obra inconclusa». Para la ley, una obra es inconclusa cuando, un año después de vencido el plazo para liquidar su contrato, no se terminó o no presta el servicio (Ley 2020 de 2020).');
+        expect(condition.get('a[href="#contraloria"]').text()).toBe('¿Qué puede hacer?');
+        wrapper.unmount();
+    });
+
+    it('does not bring up obra inconclusa for a worksite that is not at risk', async () => {
+        const wrapper = await openWorksite(calle30({ condition: NORMAL }));
+
+        expect(wrapper.get('[data-test="condition"]').text()).not.toContain('obra inconclusa');
+        expect(wrapper.find('[data-test="condition"] a[href="#contraloria"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
+    it('Cualquier ciudadano puede avisar a la Contraloría: its free lines, SIPAR and all its channels, without an account', async () => {
+        const wrapper = await openWorksite(calle30({ condition: NORMAL }));
+        const section = wrapper.get('section#contraloria');
+        const link = (text) => section.findAll('a').find((candidate) => candidate.text() === text);
+
+        expect(section.get('h2').text()).toBe('¿Sabe de un problema en esta obra?');
+        expect(section.text()).toContain('No hace falta ser veedor ni tener cuenta en GovTrace');
+        expect(link('Línea gratuita 199').attributes('href')).toBe('tel:199');
+        expect(link('01 8000 910060').attributes('href')).toBe('tel:018000910060');
+        expect(link('Denunciar en línea (SIPAR)').attributes()).toMatchObject({ href: 'https://denuncie.contraloria.gov.co:8443/sipar/', target: '_blank', rel: 'noopener' });
+        expect(link('Todos los canales de la Contraloría').attributes()).toMatchObject({ href: 'https://www.contraloria.gov.co/atencion-al-ciudadano/denuncias-y-otras-solicitudes-pqrd', target: '_blank' });
+        wrapper.unmount();
+    });
+
+    it('Con recursos locales puede ser competente la contraloría territorial: said beside the channels', async () => {
+        const wrapper = await openWorksite();
+
+        expect(wrapper.get('section#contraloria').text()).toContain('La Contraloría General atiende las denuncias sobre recursos nacionales. Si la obra se paga con recursos del departamento o del municipio, puede ser competente la contraloría de ese territorio.');
+        wrapper.unmount();
+    });
+});
+
+// It. 44f — US-059-LEG.
+describe('Informar a esta veeduría (it. 44f)', () => {
+    it('offers the citizen to inform the veeduría, before the channels of the Contraloría', async () => {
+        const wrapper = await openWorksite();
+        const sections = wrapper.findAll('section[id]').map((section) => section.attributes('id'));
+
+        expect(wrapper.get('section#informar h2').text()).toBe('Informar a esta veeduría');
+        expect(sections.indexOf('informar')).toBeLessThan(sections.indexOf('contraloria'));
+        wrapper.unmount();
+    });
+});
+
+// It. 40f — R-UX-10.
+describe('Las pantallas vacías, ilustradas (it. 40f)', () => {
+    it('draws an empty camera when the worksite has no published evidence yet', async () => {
+        const wrapper = await openWorksite(calle30({ timeline: [] }));
+
+        expect(wrapper.get('[data-test="empty"]').text()).toContain('Aún no hay evidencias publicadas de esta obra.');
+        expect(wrapper.get('[data-test="empty"] svg').attributes('data-illustration')).toBe('evidence');
+        wrapper.unmount();
+    });
+});
+
+// It. 58 (US-059-LEG): una obra cuya ubicación está por confirmar.
+describe('Vista de obra sin ubicación (it. 58)', () => {
+    const SEAT = { latitude: 11.204679, longitude: -74.199829 };
+
+    it('El ciudadano propone dónde queda una obra sin ubicación: the page says it is not on the map, and the form asks where it is from the seat of its municipality', async () => {
+        const wrapper = await openWorksite(calle30({ located: false, seat: SEAT, timeline: [] }));
+
+        expect(wrapper.get('[data-test="unlocated"]').text()).toBe('Esta obra aún no está en el mapa: su ubicación está por confirmar. Si sabe dónde queda, dígaselo a la veeduría.');
+        expect(wrapper.findComponent(CitizenReportForm).props()).toMatchObject({ worksiteId: '01j9xq3m7v8k2d4f6g8h0jkmnp', proposeFrom: SEAT });
+        wrapper.unmount();
+    });
+
+    it('Una obra que ya tiene ubicación no la pide: no note, and no starting point for the form', async () => {
+        const wrapper = await openWorksite(calle30({ located: true, seat: null }));
+
+        expect(wrapper.find('[data-test="unlocated"]').exists()).toBe(false);
+        expect(wrapper.findComponent(CitizenReportForm).props('proposeFrom')).toBeNull();
+        wrapper.unmount();
+    });
+});
+
+// It. 60 (US-029): la miniatura de cada foto, y la evidencia a la que lleva la tarjeta del mapa.
+describe('Las miniaturas en la vista de la obra (it. 60)', () => {
+    it('Sin miniatura, la tarjeta muestra la foto completa: the timeline shows the thumbnail, or the photo when there is none', async () => {
+        const withThumbnail = { ...abandonment, files: [{ ...abandonment.files[0], thumbnail_url: '/public/evidences/40/thumbnail' }, { id: 41, kind: 'photo', sha256: 'ab'.repeat(32), photo_url: '/public/evidences/41/photo', download_url: '/public/evidences/41/download', proof_url: '/public/evidences/41/proof' }] };
+        const wrapper = await openWorksite(calle30({ timeline: [withThumbnail] }));
+
+        expect(wrapper.findAll('[data-test="thumbnail"] img').map((image) => image.attributes('src'))).toEqual(['/public/evidences/40/thumbnail', '/public/evidences/41/photo']);
+        // El visor abre la foto completa, no la miniatura.
+        await wrapper.get('[data-test="thumbnail"]').trigger('click');
+        expect(wrapper.get('[role="dialog"] img').attributes('src')).toBe('/public/evidences/40/photo');
+        wrapper.unmount();
+    });
+
+    it('Una miniatura lleva a esa evidencia en la página de la obra: the page goes to it once loaded', async () => {
+        const scrolled = vi.fn();
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function () {
+            scrolled(this.id);
+        };
+        window.history.replaceState(null, '', `#evidencia-${progress.report_id}`);
+        try {
+            const wrapper = await openWorksite();
+
+            expect(wrapper.get(`#evidencia-${progress.report_id}`).element.tagName).toBe('LI');
+            expect(scrolled).toHaveBeenCalledWith(`evidencia-${progress.report_id}`);
+            wrapper.unmount();
+        } finally {
+            Element.prototype.scrollIntoView = original;
+            window.history.replaceState(null, '', window.location.pathname);
+        }
+    });
+});
+
+// It. 66b (US-069): cuántos ciudadanos informaron, encima del formulario para informar.
+describe('Lo que informan los ciudadanos, en la página de la obra (it. 66b)', () => {
+    it('Otro ciudadano se suma a lo que ya se informó de una obra: the page shows how many, with "Yo también lo vi"', async () => {
+        const wrapper = await openWorksite(calle30({ citizens: { count: 2, status: 'Esperando respuesta de la veeduría', open: true } }));
+
+        expect(wrapper.get('[data-test="citizens-count"]').text()).toBe('2 ciudadanos informaron sobre esta obra · Esperando respuesta de la veeduría');
+        expect(wrapper.text()).toContain('Yo también lo vi');
+    });
+
+    it('Un informe descartado no cuenta en público: nothing to show without citizens', async () => {
+        const wrapper = await openWorksite(calle30({ citizens: null }));
+
+        expect(wrapper.find('[data-test="citizens-count"]').exists()).toBe(false);
+    });
+});
+
+// It. 66c (US-069): compartir la obra — el menú del celular, o copiar el enlace.
+describe('Compartir la obra (it. 66c)', () => {
+    afterEach(() => {
+        delete navigator.share;
+        delete navigator.clipboard;
+    });
+
+    it('La obra se comparte con una vista previa: "Compartir esta obra" opens the share menu of the phone, with the work and its state', async () => {
+        navigator.share = vi.fn(async () => {});
+        const wrapper = await openWorksite(calle30());
+
+        await wrapper.findAll('button').find((candidate) => candidate.text() === 'Compartir esta obra').trigger('click');
+        await flushPromises();
+
+        expect(navigator.share).toHaveBeenCalledWith({ title: 'Pavimentación Calle 30 · En riesgo', text: 'Mire esta obra en GovTrace: su estado y sus evidencias selladas.', url: window.location.href });
+    });
+
+    it('copies the link where the browser cannot share, and says so', async () => {
+        navigator.clipboard = { writeText: vi.fn(async () => {}) };
+        const wrapper = await openWorksite(calle30());
+
+        await wrapper.findAll('button').find((candidate) => candidate.text() === 'Compartir esta obra').trigger('click');
+        await flushPromises();
+
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith(window.location.href);
+        expect(wrapper.text()).toContain('Enlace copiado: péguelo donde quiera compartirlo.');
+    });
+});

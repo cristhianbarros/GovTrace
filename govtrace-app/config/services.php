@@ -1,0 +1,60 @@
+<?php
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Third Party Services
+    |--------------------------------------------------------------------------
+    |
+    | This file is for storing the credentials for third party services such
+    | as Resend, Postmark, AWS, and more. This file provides the de facto
+    | location for this type of information, allowing packages to have
+    | a conventional file to locate the various service credentials.
+    |
+    */
+
+    'postmark' => [
+        'key' => env('POSTMARK_API_KEY'),
+    ],
+
+    'resend' => [
+        'key' => env('RESEND_API_KEY'),
+    ],
+
+    'ses' => [
+        'key' => env('AWS_ACCESS_KEY_ID'),
+        'secret' => env('AWS_SECRET_ACCESS_KEY'),
+        'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+    ],
+
+    'slack' => [
+        'notifications' => [
+            'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
+            'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
+        ],
+    ],
+
+    // US-022: las alertas críticas del Super Administrador, además del
+    // correo, a un webhook entrante de Slack o de Discord. Vacío: solo correo.
+    'alerts' => [
+        'webhook_url' => env('ALERT_WEBHOOK_URL'),
+    ],
+
+    // US-004: el precio de XLM en pesos, para estimar el costo de las
+    // comisiones. El plan gratuito de CoinGecko no necesita llave; con una
+    // llave "demo" se envía en COINGECKO_API_KEY.
+    'xlm_price' => [
+        'url' => env('XLM_PRICE_API_URL', 'https://api.coingecko.com/api/v3/simple/price'),
+        'api_key' => env('COINGECKO_API_KEY'),
+    ],
+
+    // It. 68: ubicar una obra por su dirección, con OpenStreetMap (Nominatim).
+    // Su política pide que la aplicación se identifique; con NOMINATIM_URL,
+    // una instancia propia.
+    'nominatim' => [
+        'url' => env('NOMINATIM_URL', 'https://nominatim.openstreetmap.org'),
+        'user_agent' => env('NOMINATIM_USER_AGENT', 'GovTrace (+https://github.com/cristhianbarros/govtrace-app)'),
+    ],
+
+];

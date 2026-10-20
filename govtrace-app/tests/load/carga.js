@@ -1,0 +1,143 @@
+// It. 50 — prueba de carga (make load-test): k6 contra una organización de
+// pruebas (la que deja tests/e2e/fixture.php). Tres escenarios a la vez:
+//   publico: ciudadanos mirando el mapa, la lista de obras y las estadísticas;
+//   veedor:  veedores que entran, buscan su obra y envían un reporte con foto;
+//   administrador (it. 52, ADMINS=n): administradores que abren su bandeja y piden las siguientes páginas.
+//   Cada escenario se prende con su cantidad (PUBLIC_RATE, VEEDORES, ADMINS): con 0, no corre.
+// Los límites de la app (PUBLIC_REQUESTS_PER_MINUTE por IP, REPORTS_PER_VEEDOR_PER_HOUR)
+// existen para esto: un solo generador sale por una IP y los alcanza pronto. Un 429
+// se cuenta aparte (`limitadas`), no como error. Para medir la capacidad sin
+// ellos, el entorno de la prueba los sube (docs/prueba-de-carga.md).
+import crypto from 'k6/crypto';
+import http from 'k6/http';
+import { check, group, sleep } from 'k6';
+import { Counter, Trend } from 'k6/metrics';
+
+const BASE = __ENV.BASE_URL || 'http://veeduria-e2e.govtrace.localhost:8080';
+const EMAIL = __ENV.VEEDOR_EMAIL || 'e2e.veedor@correo.co';
+const PASSWORD = __ENV.VEEDOR_PASSWORD || 'Veeduria#2026';
+// Sin CONTRACT_ID, cada reporte elige una obra de la lista del veedor (sin ubicación primero).
+const CONTRACT = __ENV.CONTRACT_ID || '';
+const LAT = __ENV.LAT || '11.2419';
+const LNG = __ENV.LNG || '-74.1990';
+const PUBLIC_RATE = Number(__ENV.PUBLIC_RATE ?? 5); // peticiones por segundo
+const VEEDORES = Number(__ENV.VEEDORES ?? 3);
+const ADMINS = Number(__ENV.ADMINS ?? 0);
+const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'e2e.admin@correo.co';
+const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || PASSWORD;
+const DURATION = __ENV.DURATION || '2m';
+
+const photo = open('../fixtures/evidence/rostros-lejanos.jpg', 'b');
+const photoHash = crypto.sha256(photo, 'hex');
+
+const limitadas = new Counter('limitadas');
+const reportes = new Counter('reportes_recibidos');
+const rechazados = new Counter('reportes_rechazados');
+const envioDeReporte = new Trend('envio_de_reporte', true);
+
+const scenarios = {};
+if (PUBLIC_RATE > 0) scenarios.publico = { executor: 'constant-arrival-rate', rate: PUBLIC_RATE, timeUnit: '1s', duration: DURATION, preAllocatedVUs: 20, maxVUs: 100, exec: 'publico' };
+if (VEEDORES > 0) scenarios.veedor = { executor: 'constant-vus', vus: VEEDORES, duration: DURATION, exec: 'veedor' };
+if (ADMINS > 0) scenarios.administrador = { executor: 'constant-vus', vus: ADMINS, duration: DURATION, exec: 'administrador' };
+
+export const options = {
+    scenarios,
+    thresholds: {
+        // Lo que importa: que lo que la app acepta no falle ni se arrastre.
+        'http_req_failed{expected_response:true}': ['rate<0.01'],
+        'http_req_duration{scenario:publico}': ['p(95)<1500'],
+        'http_req_duration{name:reporte}': ['p(95)<5000'],
+        // It. 52: abrir la bandeja con miles de evidencias por revisar.
+        'http_req_duration{name:bandeja}': ['p(95)<1000'],
+        checks: ['rate>0.99'],
+    },
+};
+
+// Un 429 es la app defendiéndose: se cuenta, no es una falla.
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 422, 429));
+
+function watch(response) {
+    if (response.status === 429) limitadas.add(1);
+    return response;
+}
+
+export function publico() {
+    const route = ['/public/worksites', '/public/worksites/list', '/public/stats', '/public/worksites/filters'][Math.floor(Math.random() * 4)];
+    const response = watch(http.get(`${BASE}${route}`, { headers: { Accept: 'application/json' }, tags: { name: route } }));
+    check(response, { 'público: 200 o limitada': (r) => r.status === 200 || r.status === 429 });
+}
+
+function xsrf() {
+    const jar = http.cookieJar().cookiesForURL(BASE);
+    return jar['XSRF-TOKEN'] ? decodeURIComponent(jar['XSRF-TOKEN'][0]) : '';
+}
+
+function logIn() {
+    http.get(`${BASE}/login`);
+    const response = http.post(`${BASE}/login`, JSON.stringify({ email: EMAIL, password: PASSWORD }), {
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
+        tags: { name: 'login' },
+    });
+    return check(response, { 'veedor: entró': (r) => r.status < 400 });
+}
+
+export function veedor() {
+    if (!logIn()) {
+        sleep(5);
+        return;
+    }
+    group('un reporte', () => {
+        const headers = { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() };
+        const browse = watch(http.post(`${BASE}/contracts/browse`, JSON.stringify({ latitude: Number(LAT), longitude: Number(LNG), accuracy: 12 }), {
+            headers: { ...headers, 'Content-Type': 'application/json' }, tags: { name: 'browse' },
+        }));
+        check(browse, { 'veedor: lista de obras': (r) => r.status === 200 || r.status === 429 });
+
+        const works = browse.status === 200 ? browse.json('data') : [];
+        const pool = works.filter((work) => !work.located);
+        const chosen = (pool.length ? pool : works)[Math.floor(Math.random() * (pool.length || works.length))];
+        const contract = CONTRACT || (chosen && chosen.secop_contract_id);
+        if (!contract) return;
+
+        const sent = watch(http.post(`${BASE}/reports`, {
+            secop_contract_id: contract,
+            classification: 'Avance',
+            comment: `Carga ${__VU}-${__ITER}`,
+            latitude: LAT,
+            longitude: LNG,
+            accuracy_meters: '12',
+            captured_at: new Date().toISOString(),
+            'files[]': http.file(photo, 'foto.jpg', 'image/jpeg'),
+            'hashes[]': photoHash,
+        }, { headers, tags: { name: 'reporte' } }));
+        envioDeReporte.add(sent.timings.duration);
+        if (sent.status === 201 || sent.status === 200) reportes.add(1);
+        // 422: la obra ya tiene ubicación y el GPS de la prueba está fuera de su geocerca (LAT y LNG).
+        if (sent.status === 422) rechazados.add(1);
+        check(sent, { 'veedor: reporte recibido, limitado o fuera de la geocerca': (r) => [200, 201, 422, 429].includes(r.status) });
+    });
+    sleep(5 + Math.random() * 5);
+}
+
+// It. 52: un administrador abre su bandeja (la primera página) y, a veces, pide la siguiente.
+// Entra en cada iteración: el jar de cookies de k6 se vaciaba tras la primera respuesta grande
+// (con curl, la misma sesión sigue valiendo), así que no se reutiliza. El login lleva su
+// etiqueta, y la medición de la bandeja queda limpia.
+export function administrador() {
+    http.get(`${BASE}/login`);
+    const login = http.post(`${BASE}/login`, JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }), {
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
+        tags: { name: 'login' },
+    });
+    if (!check(login, { 'administrador: entró': (r) => r.status < 400 })) {
+        sleep(5);
+        return;
+    }
+    const inbox = watch(http.get(`${BASE}/inbox`, { headers: { Accept: 'application/json' }, tags: { name: 'bandeja' } }));
+    check(inbox, { 'administrador: bandeja': (r) => r.status === 200 || r.status === 429 });
+    if (inbox.status === 200 && inbox.json('has_more')) {
+        const next = watch(http.get(`${BASE}/inbox?page=2`, { headers: { Accept: 'application/json' }, tags: { name: 'bandeja-pagina-2' } }));
+        check(next, { 'administrador: página 2': (r) => r.status === 200 || r.status === 429 });
+    }
+    sleep(2 + Math.random() * 2);
+}

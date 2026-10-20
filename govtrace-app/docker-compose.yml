@@ -1,0 +1,372 @@
+name: govtrace
+
+# Shared base for every service that runs the application image and code.
+# Repeating it per service guarantees they drift apart one day.
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+    target: dev              # base -> dev | vendor | assets | qa
+    # The RUN steps of a build use Docker's default bridge (docker0,
+    # 172.17.0.0/16), which a VPN can hijack with its own routes: no DNS,
+    # no internet. Then DOCKER_BUILD_NETWORK=host (see .env.docker).
+    network: "${DOCKER_BUILD_NETWORK:-default}"
+    args:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      TZ:   "${TZ:-UTC}"
+  image: govtrace-app:dev
+  environment: &app-env
+    PUID: "${PUID:-1000}"
+    PGID: "${PGID:-1000}"
+    TZ:   "${TZ:-UTC}"
+    DOCKER_SUBNET: "${DOCKER_SUBNET:-172.29.0.0/24}"
+  volumes:
+    - .:/var/www/html
+    - ./docker/app/xdebug.ini:/usr/local/etc/php/conf.d/zzz-xdebug.ini:ro
+    - composer_cache:/tmp/composer
+  extra_hosts:
+    # Not native on Linux. Declaring it makes the same xdebug.client_host work
+    # on Linux, WSL2 and Docker Desktop.
+    - "host.docker.internal:host-gateway"
+  networks: [govtrace]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+
+  # ---------------------------------------------------------------- app ----
+  app:
+    <<: *app-base
+    depends_on:
+      pgsql:
+        condition: service_healthy
+    # expose, not ports: only the proxy may reach it. Two entry points would
+    # mean two behaviours depending on where the request came in.
+    expose: ["80"]
+
+  # -------------------------------------------------------------- proxy ----
+  proxy:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${LOCAL_IP:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [govtrace]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      # nginx mismo (/healthz), no la app detrás: la app tiene su propio chequeo.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------- scheduler ----
+  scheduler:
+    <<: *app-base
+    command: php artisan schedule:work
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      <<: *app-env
+      XDEBUG_MODE: "off"
+    depends_on:
+      pgsql:
+        condition: service_healthy
+    # Default is 10s: a running task would be cut mid-write.
+    stop_grace_period: 60s
+    healthcheck:
+      # procps is not in the image; PID 1 is the exec'd artisan process.
+      test: ["CMD-SHELL", "grep -q schedule:work /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # -------------------------------------------------------------- pgsql ----
+  pgsql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       "${DB_DATABASE:-govtrace}"
+      POSTGRES_USER:     "${DB_USERNAME:-govtrace}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-secret}"
+      TZ:                "${TZ:-UTC}"
+      PGTZ:              "${TZ:-UTC}"
+    volumes:
+      - pgsql_data:/var/lib/postgresql/data
+      - ./docker/pgsql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${LOCAL_IP:-127.0.0.1}:${PG_PORT:-5432}:5432"
+    networks: [govtrace]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      # pg_isready does not authenticate: no password visible in "ps".
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # ---------------------------------------------------------- storage -----
+  # S3-compatible object storage for evidence files (D2, specs/PLAN.md). A
+  # real S3 bucket is the target in production (config/filesystems.php).
+  # It. 45d: versitygw, an S3 gateway that keeps each object as a plain file
+  # in its volume, so the evidence survives a restart. LocalStack (free) kept
+  # S3 in memory and lost every photo on each restart; MinIO gated its images
+  # behind a login in 2025. 100 MB instead of LocalStack's 2 GB. The bucket is
+  # a directory: it is created on start if missing.
+  storage:
+    image: versity/versitygw:v1.8.0
+    entrypoint: ["sh", "-c", "mkdir -p \"/data/$${EVIDENCE_BUCKET}\" && exec /usr/local/bin/docker-entrypoint.sh"]
+    environment:
+      EVIDENCE_BUCKET: "${MINIO_BUCKET:-evidencias}"
+      # The same keys as EVIDENCE_AWS_* in the Laravel .env and the backup service.
+      ROOT_ACCESS_KEY_ID: "${STORAGE_ACCESS_KEY_ID:-govtrace}"
+      ROOT_SECRET_ACCESS_KEY: "${STORAGE_SECRET_ACCESS_KEY:-secretsecret}"
+      VGW_PORT: ":4566"
+      VGW_HEALTH: /health
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /data
+    volumes:
+      - evidence_files:/data
+    ports:
+      - "${LOCAL_IP:-127.0.0.1}:${MINIO_PORT:-9000}:4566"
+    networks: [govtrace]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4566/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # ------------------------------------------------------------ mailpit ----
+  # It. 38b: el buzón de desarrollo. Cada correo que envía la app llega también
+  # aquí (MAIL_COPY_TO_MAILPIT=true), y se lee en
+  # http://mailpit.govtrace.localhost:8080, por el proxy. Guarda los últimos
+  # 1.000 en memoria: se vacía al reiniciarlo. Solo en desarrollo:
+  # docker-compose.prod.yml no lo tiene.
+  mailpit:
+    image: axllent/mailpit:v1.31
+    environment:
+      MP_MAX_MESSAGES: 1000
+      TZ: America/Bogota
+    networks: [govtrace]
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    # El chequeo de salud viene en la imagen (/mailpit readyz).
+
+  # ------------------------------------------------------------- worker ----
+  # Laravel ships with QUEUE_CONNECTION=database (D1, specs/PLAN.md it.1):
+  # no Redis needed for the MVP queue, so the worker only depends on pgsql.
+  # It. 64: los correos van por la cola "mail", y este worker la atiende
+  # primero. En producción tienen su propio worker (docker-compose.prod.yml).
+  worker:
+    <<: *app-base
+    command: php artisan queue:work --queue=mail,default --tries=3 --max-time=3600
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      <<: *app-env
+      XDEBUG_MODE: "off"
+    depends_on:
+      pgsql:
+        condition: service_healthy
+    stop_grace_period: 60s
+    healthcheck:
+      # Overrides the Dockerfile's Apache-based HEALTHCHECK: this container
+      # never starts a web server, so that check would always fail here.
+      test: ["CMD-SHELL", "grep -q queue:work /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ------------------------------------------------------------- backup ----
+  # R-BCK-01..04 (it. 35): una copia de todas las bases y de los archivos de
+  # evidencia al arrancar y cada hora en punto, guardadas 30 días en el
+  # volumen backup_data. En producción ese volumen va en otro disco u otra
+  # máquina (docs/restore.md): una copia en el mismo disco no sobrevive a él.
+  backup:
+    build:
+      context: .
+      dockerfile: docker/backup/Dockerfile
+      network: "${DOCKER_BUILD_NETWORK:-default}"
+    image: govtrace-backup:dev
+    environment:
+      PGHOST: pgsql
+      PGUSER: "${DB_USERNAME:-govtrace}"
+      PGPASSWORD: "${DB_PASSWORD:-secret}"
+      PGDATABASE: "${DB_DATABASE:-govtrace}"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT-http://storage:4566}"
+      BACKUP_S3_BUCKET: "${MINIO_BUCKET:-evidencias}"
+      # It. 45d: by default, the keys of the development S3 (the storage service).
+      AWS_ACCESS_KEY_ID: "${BACKUP_AWS_ACCESS_KEY_ID:-${STORAGE_ACCESS_KEY_ID:-govtrace}}"
+      AWS_SECRET_ACCESS_KEY: "${BACKUP_AWS_SECRET_ACCESS_KEY:-${STORAGE_SECRET_ACCESS_KEY:-secretsecret}}"
+      AWS_DEFAULT_REGION: "${EVIDENCE_AWS_DEFAULT_REGION:-us-east-1}"
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-30}"
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-3600}"
+      # La base de los tests no es un dato: no se respalda.
+      BACKUP_EXCLUDE_DATABASES: "${BACKUP_EXCLUDE_DATABASES:-testing}"
+      # It. 37a: la réplica fuera del sitio, a otro bucket (vacío: sin réplica).
+      BACKUP_OFFSITE_S3_URL: "${BACKUP_OFFSITE_S3_URL:-}"
+      BACKUP_OFFSITE_S3_ENDPOINT: "${BACKUP_OFFSITE_S3_ENDPOINT:-}"
+      BACKUP_OFFSITE_AWS_ACCESS_KEY_ID: "${BACKUP_OFFSITE_AWS_ACCESS_KEY_ID:-}"
+      BACKUP_OFFSITE_AWS_SECRET_ACCESS_KEY: "${BACKUP_OFFSITE_AWS_SECRET_ACCESS_KEY:-}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - backup_data:/backups
+    depends_on:
+      pgsql:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    networks: [govtrace]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      # Sano mientras la última copia completa tenga menos de 2 horas y, con
+      # réplica fuera del sitio, también la última réplica.
+      test: ["CMD-SHELL", "find /backups -mindepth 1 -maxdepth 1 -type d -name '2*Z' -mmin -130 | grep -q . && { [ -z \"$$BACKUP_OFFSITE_S3_URL\" ] || find /backups/.offsite -mmin -130 | grep -q .; }"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ========================= optional profiles ============================
+
+  # R-BCK-05: el PostgreSQL vacío de la restauración de prueba (make
+  # restore-drill). Sin volumen: se descarta al terminar.
+  restore-pg:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: "${DB_USERNAME:-govtrace}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-secret}"
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [govtrace]
+    profiles: [restore]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U \"$${POSTGRES_USER}\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  adminer:
+    image: adminer:4-standalone
+    environment:
+      ADMINER_DEFAULT_SERVER: pgsql
+    networks: [govtrace]
+    profiles: [tools]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  node:
+    image: node:22-alpine
+    working_dir: /var/www/html
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      HOME: /tmp
+      # Inside the project, not a named volume: a named volume would be
+      # created owned by root and npm would fail with EACCES.
+      NPM_CONFIG_CACHE: /var/www/html/.cache/npm
+    volumes:
+      - .:/var/www/html
+    networks: [govtrace]
+    profiles: [frontend]
+    security_opt: [no-new-privileges:true]
+    command: sh
+
+  # --- async profile: redis, opt-in, not used by the MVP queue -----------
+  # Laravel ships with QUEUE_CONNECTION=database (D1); the worker above
+  # runs unconditionally against it. Redis stays available for whoever
+  # needs it directly (cache experiments, a future async pipeline).
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks: [govtrace]
+    profiles: [async]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Perfil "stellar" (it. 12, D4): sellado en Stellar / Soroban --------
+  # Red local standalone: la misma imagen que levanta `stellar container
+  # start local`. RPC y friendbot en http://stellar:8000 dentro de la red de
+  # Docker. Protocolo 27 y límites de testnet, como la red principal: lo que
+  # funciona aquí cabe allá. Su estado se reinicia con el contenedor.
+  stellar:
+    image: stellar/quickstart:v670-b1459.1-latest
+    command: ["--local", "--enable", "core,rpc", "--limits", "testnet", "--protocol-version", "27"]
+    ports:
+      - "${LOCAL_IP:-127.0.0.1}:${STELLAR_PORT:-8100}:8000"
+    networks: [govtrace]
+    profiles: [stellar]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getHealth\"}' http://127.0.0.1:8000/rpc | grep -q healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # Rust + Stellar CLI (docker/soroban/Dockerfile): compila, prueba y
+  # despliega el contrato de contracts/sealing. Se usa con `make contract-*`.
+  soroban:
+    build:
+      context: docker/soroban
+      network: "${DOCKER_BUILD_NETWORK:-default}"   # same reason as the app image
+    image: govtrace-soroban:dev
+    user: "${PUID:-1000}:${PGID:-1000}"
+    working_dir: /workspace/contracts/sealing
+    environment:
+      # Las identidades de desarrollo de Stellar CLI quedan en .cache/ (fuera de git).
+      HOME: /workspace/.cache/stellar-home
+      STELLAR_RPC_URL: http://stellar:8000/rpc
+      STELLAR_NETWORK_PASSPHRASE: "Standalone Network ; February 2017"
+      STELLAR_FRIENDBOT_URL: http://stellar:8000/friendbot
+    volumes:
+      - .:/workspace
+      - cargo_registry:/usr/local/cargo/registry
+    networks: [govtrace]
+    profiles: [stellar]
+    security_opt: [no-new-privileges:true]
+    command: sh
+
+networks:
+  govtrace:
+    name: "${DOCKER_NETWORK:-govtrace_net}"
+    driver: bridge
+    ipam:
+      config:
+        # Fixed subnet so RemoteIPTrustedProxy (vhost.conf) can trust exactly
+        # this range. Change it in .env.docker if it collides with a VPN route.
+        - subnet: "${DOCKER_SUBNET:-172.29.0.0/24}"
+    driver_opts:
+      # Lower it (e.g. 1354) if a VPN with a smaller MTU hangs large responses
+      # only inside containers.
+      com.docker.network.driver.mtu: "${DOCKER_MTU:-1500}"
+
+volumes:
+  pgsql_data:
+  evidence_files: # it. 45d: the evidence files of development (S3, versitygw)
+  backup_data:
+  composer_cache:
+  cargo_registry:

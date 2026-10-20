@@ -1,0 +1,506 @@
+{
+  "escritorio/admin-administrators": {
+    "axe": {},
+    "textUnder16": 1,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 15
+  },
+  "escritorio/admin-audit": {
+    "axe": {},
+    "textUnder16": 66,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 23
+  },
+  "escritorio/admin-authorization": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 12
+  },
+  "escritorio/admin-citizen-reports": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 11
+  },
+  "escritorio/admin-contracts": {
+    "axe": {},
+    "textUnder16": 32,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 17
+  },
+  "escritorio/admin-inbox": {
+    "axe": {},
+    "textUnder16": 10,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 17
+  },
+  "escritorio/admin-observers": {
+    "axe": {},
+    "textUnder16": 3,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 18
+  },
+  "escritorio/admin-organization": {
+    "axe": {},
+    "textUnder16": 20,
+    "textUnder14": 0,
+    "smallTargets": 5,
+    "targets": 19
+  },
+  "escritorio/admin-summary": {
+    "axe": {},
+    "textUnder16": 16,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 12
+  },
+  "escritorio/admin-territory": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 14
+  },
+  "escritorio/admin-worksites": {
+    "axe": {},
+    "textUnder16": 8,
+    "textUnder14": 0,
+    "smallTargets": 6,
+    "targets": 17
+  },
+  "escritorio/publico-contrato": {
+    "axe": {},
+    "textUnder16": 4,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 14
+  },
+  "escritorio/publico-entrar-central": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "escritorio/publico-entrar-veeduria": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 7
+  },
+  "escritorio/publico-estadisticas": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 7
+  },
+  "escritorio/publico-inicio": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 12
+  },
+  "escritorio/publico-inicio-sugerencia": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 15
+  },
+  "escritorio/publico-mapa": {
+    "axe": {},
+    "textUnder16": 9,
+    "textUnder14": 0,
+    "smallTargets": 21,
+    "targets": 24
+  },
+  "escritorio/publico-obra": {
+    "axe": {},
+    "textUnder16": 8,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 22
+  },
+  "escritorio/publico-privacidad": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "escritorio/publico-tarjeta": {
+    "axe": {},
+    "textUnder16": 7,
+    "textUnder14": 0,
+    "smallTargets": 17,
+    "targets": 29
+  },
+  "escritorio/publico-validador": {
+    "axe": {},
+    "textUnder16": 5,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "escritorio/superadmin-auditoria": {
+    "axe": {},
+    "textUnder16": 76,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 37
+  },
+  "escritorio/superadmin-nueva-organizacion": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 5,
+    "targets": 19
+  },
+  "escritorio/superadmin-organizaciones": {
+    "axe": {},
+    "textUnder16": 4,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 20
+  },
+  "escritorio/superadmin-parametros": {
+    "axe": {},
+    "textUnder16": 11,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 21
+  },
+  "escritorio/superadmin-secop": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 10
+  },
+  "escritorio/superadmin-sellado": {
+    "axe": {},
+    "textUnder16": 30,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 9
+  },
+  "escritorio/superadmin-solicitudes": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 14
+  },
+  "escritorio/superadmin-super-administradores": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 11
+  },
+  "escritorio/superadmin-uso": {
+    "axe": {},
+    "textUnder16": 46,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 9
+  },
+  "escritorio/veedor-declaracion": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 3
+  },
+  "escritorio/veedor-mis-reportes": {
+    "axe": {},
+    "textUnder16": 17,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "escritorio/veedor-nuevo-reporte": {
+    "axe": {},
+    "textUnder16": 23,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 5
+  },
+  "escritorio/veedor-reporte-armado": {
+    "axe": {},
+    "textUnder16": 1,
+    "textUnder14": 0,
+    "smallTargets": 10,
+    "targets": 10
+  },
+  "escritorio/veedor-revisar-foto": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 5,
+    "targets": 22
+  },
+  "movil/admin-administrators": {
+    "axe": {},
+    "textUnder16": 2,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "movil/admin-audit": {
+    "axe": {},
+    "textUnder16": 72,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 17
+  },
+  "movil/admin-authorization": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "movil/admin-citizen-reports": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 5
+  },
+  "movil/admin-contracts": {
+    "axe": {},
+    "textUnder16": 33,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 11
+  },
+  "movil/admin-inbox": {
+    "axe": {},
+    "textUnder16": 13,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 11
+  },
+  "movil/admin-observers": {
+    "axe": {},
+    "textUnder16": 3,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 12
+  },
+  "movil/admin-organization": {
+    "axe": {},
+    "textUnder16": 25,
+    "textUnder14": 0,
+    "smallTargets": 8,
+    "targets": 13
+  },
+  "movil/admin-summary": {
+    "axe": {},
+    "textUnder16": 24,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "movil/admin-territory": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "movil/admin-worksites": {
+    "axe": {},
+    "textUnder16": 9,
+    "textUnder14": 0,
+    "smallTargets": 9,
+    "targets": 11
+  },
+  "movil/publico-contrato": {
+    "axe": {},
+    "textUnder16": 4,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 14
+  },
+  "movil/publico-entrar-central": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "movil/publico-entrar-veeduria": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 7
+  },
+  "movil/publico-estadisticas": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 7
+  },
+  "movil/publico-inicio": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 12
+  },
+  "movil/publico-inicio-sugerencia": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 15
+  },
+  "movil/publico-mapa": {
+    "axe": {},
+    "textUnder16": 9,
+    "textUnder14": 0,
+    "smallTargets": 21,
+    "targets": 24
+  },
+  "movil/publico-obra": {
+    "axe": {},
+    "textUnder16": 8,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 22
+  },
+  "movil/publico-privacidad": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "movil/publico-tarjeta": {
+    "axe": {},
+    "textUnder16": 7,
+    "textUnder14": 0,
+    "smallTargets": 17,
+    "targets": 29
+  },
+  "movil/publico-validador": {
+    "axe": {},
+    "textUnder16": 5,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "movil/superadmin-auditoria": {
+    "axe": {},
+    "textUnder16": 78,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 33
+  },
+  "movil/superadmin-nueva-organizacion": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 7,
+    "targets": 15
+  },
+  "movil/superadmin-organizaciones": {
+    "axe": {},
+    "textUnder16": 4,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 16
+  },
+  "movil/superadmin-parametros": {
+    "axe": {},
+    "textUnder16": 12,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 17
+  },
+  "movil/superadmin-secop": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 6
+  },
+  "movil/superadmin-sellado": {
+    "axe": {},
+    "textUnder16": 34,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 5
+  },
+  "movil/superadmin-solicitudes": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 10
+  },
+  "movil/superadmin-super-administradores": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 7
+  },
+  "movil/superadmin-uso": {
+    "axe": {},
+    "textUnder16": 60,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 5
+  },
+  "movil/veedor-declaracion": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 3
+  },
+  "movil/veedor-mis-reportes": {
+    "axe": {},
+    "textUnder16": 17,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 8
+  },
+  "movil/veedor-nuevo-reporte": {
+    "axe": {},
+    "textUnder16": 23,
+    "textUnder14": 0,
+    "smallTargets": 0,
+    "targets": 5
+  },
+  "movil/veedor-reporte-armado": {
+    "axe": {},
+    "textUnder16": 1,
+    "textUnder14": 0,
+    "smallTargets": 10,
+    "targets": 10
+  },
+  "movil/veedor-revisar-foto": {
+    "axe": {},
+    "textUnder16": 0,
+    "textUnder14": 0,
+    "smallTargets": 5,
+    "targets": 22
+  }
+}

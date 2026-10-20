@@ -1,0 +1,21 @@
+story_id: "US-045-INT"
+titulo_historia: "Como Administrador de Organización quiero agrupar varios contratos de tipo Obra en una misma ficha de obra para que una obra física con varias fases o reinicios se vea y se reporte como una sola"
+origen: "analisis_completitud"
+clasificacion_gap: "⚡ Importante"
+criterios_aceptacion:
+  escenarios_exito:
+    - "El Administrador agrupa dos o más contratos de tipo Obra de su territorio en una ficha de obra"
+  validaciones_reglas:
+    - "(It. 52, 2026-10-10) La lista de obras llega de a 20 con 'Ver 20 más' y el total, y se busca por el nombre de la ficha o el objeto de sus contratos; el enlace 'Corregir ubicación' de la Bandeja pide esa obra por su id, esté en la página que esté"
+    - "Los reportes se vinculan a la ficha completa (todos sus contratos)"
+    - "El pin de la ficha toma el peor estado entre sus contratos"
+    - "La vista pública de la obra muestra todos los contratos agrupados"
+  manejo_errores: []
+  requisitos_ux: []
+  casos_edge: []
+validacion_smart:
+  specific: true
+  measurable: true
+  achievable: true
+  relevant: true
+  testable: true

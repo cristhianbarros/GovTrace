@@ -1,0 +1,128 @@
+# language: es
+@story_id:US-027 @origin:discovery_inicial @priority:2 @epic:EPIC-004
+Característica: Pines del mapa por color de estado
+  Como Verificador Público
+  quiero ver las obras como pines que cambian de color según su estado
+  para detectar de un vistazo los proyectos en riesgo o abandono
+
+  Antecedentes:
+    Dado que soy un visitante sin sesión en el mapa público de "veeduria-smr"
+
+  @complexity:medium
+  Esquema del escenario: Color del pin según el estado de la obra
+    Dado que una obra anclada <situacion>
+    Cuando abro el mapa
+    Entonces su pin es de color "<color>"
+
+    Ejemplos:
+      | situacion                                                              | color    |
+      | está en ejecución, en plazo y sin evidencias publicadas                | verde    |
+      | está en plazo y su evidencia publicada más reciente es "Retraso"       | amarillo |
+      | está en plazo y su evidencia publicada más reciente es "Abandono"      | rojo     |
+      | venció su plazo y SECOP la sigue mostrando "En ejecución"              | rojo     |
+      | fue liquidada hace 3 meses y no tiene evidencias publicadas            | verde    |
+      | fue liquidada hace 3 meses y su evidencia publicada más reciente es "Retraso" | amarillo |
+
+  @complexity:medium @negative
+  Escenario: El color refleja la evidencia publicada más reciente
+    Dado que una obra en plazo tenía como evidencia más reciente un "Abandono"
+    Cuando se publica una evidencia más reciente clasificada como "Avance"
+    Entonces su pin deja de ser rojo
+
+  @complexity:medium @negative
+  Escenario: Las evidencias no publicadas no cambian el color
+    Dado que una obra en plazo tiene su pin verde
+    Cuando un veedor envía un reporte de "Abandono" que sigue oculto
+    Entonces su pin sigue verde
+
+  @complexity:medium @negative
+  Escenario: Una ficha con varios contratos toma el peor estado
+    Dado que la ficha "Acueducto Gaira" agrupa un contrato en plazo y otro vencido que sigue "En ejecución"
+    Cuando abro el mapa
+    Entonces el pin de "Acueducto Gaira" es rojo
+
+  @complexity:low @negative
+  Escenario: Las obras sin ubicación no tienen pin
+    Dado que una obra de mi territorio no tiene ubicación oficial
+    Cuando abro el mapa
+    Entonces esa obra no aparece como pin
+
+  @complexity:low @negative
+  Escenario: El mapa de una organización no muestra obras de otra
+    Dado que "Veeduría Ciénaga" tiene una obra con evidencias publicadas que "veeduria-smr" no vigila
+    Cuando abro el mapa de "veeduria-smr"
+    Entonces no veo el pin de esa obra
+
+  @complexity:low @negative
+  Escenario: La carga inicial del mapa es liviana
+    Cuando abro el mapa
+    Entonces la carga inicial solo trae id, latitud, longitud y color de cada pin
+
+  @complexity:low
+  Escenario: Un botón vuelve a mostrar todas las obras del mapa
+    Dado que me alejé de las obras moviendo o acercando el mapa
+    Cuando toco "Ver todas las obras"
+    Entonces el mapa vuelve a mostrar todos los pines, como al abrirlo
+
+  @complexity:low @privacy
+  Escenario: El mapa dice que cada punto es aproximado
+    Dado que el mapa de la veeduría tiene obras con evidencias publicadas
+    Cuando abro el mapa
+    Entonces cada pin tiene alrededor un círculo de unos 100 m
+    Y bajo el mapa se lee "Cada punto es aproximado: la obra está a unos 100 m de él. Es para proteger a quien tomó la foto."
+
+  @complexity:medium
+  Escenario: Lo público se calcula una vez por minuto
+    Dado que alguien abrió el mapa de la veeduría hace unos segundos
+    Cuando otro visitante pide el mapa, la lista, los filtros o las estadísticas
+    Entonces la respuesta sale de la memoria, sin volver a consultar las obras ni los reportes
+    Y la de cada combinación de filtros se guarda aparte
+
+  @complexity:medium
+  Escenario: Una publicación se ve de inmediato
+    Dado que el mapa de la veeduría está guardado en la memoria
+    Cuando el Administrador publica, rechaza o retira una evidencia, corrige la ubicación de una obra o agrupa contratos
+    Entonces el siguiente visitante ve el mapa y la obra ya cambiados, sin esperar el minuto
+
+  @complexity:medium @privacy
+  Escenario: La caché de una veeduría no le sirve a otra
+    Dado que el mapa de "Veeduría Ciudadana Santa Marta" está guardado en la memoria
+    Cuando un visitante pide el mapa de "Veeduría Ciénaga"
+    Entonces ve solo las obras de "Veeduría Ciénaga"
+
+  @complexity:low
+  Escenario: Lo público no abre una sesión ni pone cookies
+    Cuando un visitante sin cuenta pide el mapa, la lista, los filtros o las estadísticas
+    Entonces la respuesta no trae cookies y no queda una sesión guardada
+    Pero la pantalla de entrar sí abre su sesión
+
+  @complexity:low
+  Escenario: Los estados del mapa se explican junto al mapa, con ícono y palabra
+    Cuando abro el mapa público de la organización
+    Entonces arriba del mapa veo "✓ Normal", "! Alerta" y "✕ En riesgo", cada uno con cuántas obras tiene
+    Y cada pin lleva el mismo signo que su estado, además de su color
+    Y al tocar un estado, el mapa muestra solo sus obras
+
+  @complexity:low
+  Escenario: Llegar al mapa de una veeduría desde el Inicio
+    Dado que "Veeduría Ciudadana Santa Marta" vigila Magdalena
+    Cuando abro el Inicio de GovTrace
+    Entonces veo "¿Cómo funciona?" en tres pasos
+    Y veo "Veeduría Ciudadana Santa Marta", que vigila Magdalena, con el enlace "Ver su mapa de obras"
+    Y una veeduría dada de baja no aparece
+
+  # It. 40e: el sitio de la veeduría se recorre con pestañas, no con botones sueltos.
+
+  @complexity:low
+  Escenario: Las secciones del sitio de la veeduría se recorren con pestañas
+    Cuando abro el mapa, las estadísticas o el validador de la veeduría
+    Entonces veo las pestañas "Obras", "Estadísticas" y "Validar", con la de la pantalla actual marcada
+    Y desde una obra, la pestaña marcada es "Obras"
+
+  # It. 60 (R-MAP-02): la tarjeta de la obra, liviana y bajo demanda.
+  @complexity:low
+  Escenario: La tarjeta de una obra se pide al tocar su pin
+    Cuando cargo el mapa
+    Entonces no se pide ninguna tarjeta
+    Cuando toco un pin
+    Entonces se pide solo la tarjeta de esa obra, sin su línea de tiempo ni sus fotos completas
